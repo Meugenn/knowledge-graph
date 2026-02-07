@@ -1,13 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
 
-function SubmitPaper({ contracts, account }) {
+function SubmitPaper({ contracts, account, importData }) {
   const [formData, setFormData] = useState({
     title: '',
     abstract: '',
     doi: '',
     ipfsHash: '',
   });
+
+  // Pre-fill form when importing from Knowledge Graph
+  useEffect(() => {
+    if (importData) {
+      setFormData(prev => ({
+        ...prev,
+        title: importData.title || prev.title,
+        abstract: importData.abstract || prev.abstract,
+        doi: importData.doi || prev.doi,
+      }));
+      setMessage({ type: 'info', text: `Imported "${importData.title}" from Knowledge Graph. Fill in any missing details and submit.` });
+    }
+  }, [importData]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
 

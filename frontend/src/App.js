@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ethers } from 'ethers';
 import { CONTRACTS, NETWORKS, ABIS } from './config';
 import SubmitPaper from './components/SubmitPaper';
@@ -6,6 +6,7 @@ import PaperList from './components/PaperList';
 import ReviewPanel from './components/ReviewPanel';
 import Stats from './components/Stats';
 import NetworkCheck from './components/NetworkCheck';
+import KnowledgeGraph from './components/KnowledgeGraph';
 import './App.css';
 
 function App() {
@@ -13,8 +14,14 @@ function App() {
   const [provider, setProvider] = useState(null);
   const [signer, setSigner] = useState(null);
   const [contracts, setContracts] = useState({});
-  const [activeTab, setActiveTab] = useState('papers');
+  const [activeTab, setActiveTab] = useState('graph');
   const [loading, setLoading] = useState(false);
+  const [importData, setImportData] = useState(null);
+
+  const handleImportPaper = useCallback((paperData) => {
+    setImportData(paperData);
+    setActiveTab('submit');
+  }, []);
 
   useEffect(() => {
     if (window.ethereum) {
@@ -160,10 +167,16 @@ function App() {
             <>
               <div className="tabs">
                 <button
+                  className={`tab ${activeTab === 'graph' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('graph')}
+                >
+                  Knowledge Graph
+                </button>
+                <button
                   className={`tab ${activeTab === 'papers' ? 'active' : ''}`}
                   onClick={() => setActiveTab('papers')}
                 >
-                  📄 Papers
+                  Papers
                 </button>
                 <button
                   className={`tab ${activeTab === 'submit' ? 'active' : ''}`}
@@ -185,12 +198,15 @@ function App() {
                 </button>
               </div>
 
-              <div className="tab-content">
+              <div className={`tab-content ${activeTab === 'graph' ? 'tab-content-graph' : ''}`}>
+                {activeTab === 'graph' && (
+                  <KnowledgeGraph contracts={contracts} account={account} onImportPaper={handleImportPaper} />
+                )}
                 {activeTab === 'papers' && (
                   <PaperList contracts={contracts} account={account} />
                 )}
                 {activeTab === 'submit' && (
-                  <SubmitPaper contracts={contracts} account={account} />
+                  <SubmitPaper contracts={contracts} account={account} importData={importData} />
                 )}
                 {activeTab === 'review' && (
                   <ReviewPanel contracts={contracts} account={account} />

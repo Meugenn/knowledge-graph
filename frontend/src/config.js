@@ -1,3 +1,22 @@
+// Semantic Scholar API config
+export const SEMANTIC_SCHOLAR = {
+  BASE_URL: 'https://api.semanticscholar.org/graph/v1',
+  PROXY_URL: 'https://api.allorigins.win/raw?url=',
+  FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,references,citations',
+  SEARCH_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds',
+  MAX_NODES: 300,
+  SEARCH_LIMIT: 20,
+};
+
+export const GRAPH_COLORS = {
+  EXTERNAL: '#4A90D9',    // Blue - Semantic Scholar papers
+  ONCHAIN: '#48BB78',     // Green - on-chain papers
+  USER: '#ECC94B',        // Gold - user's own papers
+  EDGE: 'rgba(150,150,150,0.3)',
+  EDGE_HIGHLIGHT: 'rgba(102,126,234,0.8)',
+  BACKGROUND: '#0f1729',
+};
+
 // Contract addresses - localhost deployment
 export const CONTRACTS = {
   RESEARCH_GRAPH: process.env.REACT_APP_RESEARCH_GRAPH || '0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82',
