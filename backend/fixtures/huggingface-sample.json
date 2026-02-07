@@ -1,0 +1,14 @@
+{
+  "models": [
+    { "id": "bert-base-uncased", "pipeline": "fill-mask", "downloads": 45000000, "library": "transformers", "paperId": "devlin2019" },
+    { "id": "gpt2", "pipeline": "text-generation", "downloads": 32000000, "library": "transformers", "paperId": "radford2019" },
+    { "id": "meta-llama/Llama-2-7b", "pipeline": "text-generation", "downloads": 8000000, "library": "transformers", "paperId": "touvron2023" },
+    { "id": "openai/clip-vit-base-patch32", "pipeline": "zero-shot-image-classification", "downloads": 12000000, "library": "transformers", "paperId": "radford2021" },
+    { "id": "stabilityai/stable-diffusion-2-1", "pipeline": "text-to-image", "downloads": 5000000, "library": "diffusers", "paperId": "rombach2022" }
+  ],
+  "datasets": [
+    { "id": "wikitext", "downloads": 2000000, "task": "language-modeling" },
+    { "id": "squad", "downloads": 3500000, "task": "question-answering" },
+    { "id": "glue", "downloads": 1500000, "task": "text-classification" }
+  ]
+}

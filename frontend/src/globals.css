@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --radius: 0.125rem;
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
+  --primary: 0 0% 13%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 13%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 13%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 45%;
+  --chart-1: 24 80% 50%;
+  --chart-2: 160 50% 40%;
+  --chart-3: 220 40% 40%;
+  --chart-4: 50 80% 55%;
+  --chart-5: 340 60% 50%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  .section-label {
+    @apply font-mono text-xs font-bold uppercase tracking-widest text-neutral-400;
+  }
+  .section-title {
+    @apply text-4xl md:text-5xl tracking-tight;
+  }
+  .hero-title {
+    @apply text-5xl md:text-7xl lg:text-8xl tracking-tight leading-[1.1];
+  }
+  .body-text {
+    @apply text-neutral-600 font-light leading-relaxed;
+  }
+  .link-mono {
+    @apply inline-flex items-center gap-2 text-sm font-mono uppercase tracking-widest border-b border-neutral-900 pb-1 hover:opacity-70 transition-opacity;
+  }
+}
+
+/* Graph canvas dark background - preserved from original */
+.graph-canvas-container {
+  background: #0f1729;
+  border-radius: 0;
+}
+
+/* Force graph tooltip */
+.graph-tooltip {
+  background: white;
+  border: 1px solid #e5e5e5;
+  padding: 8px 12px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a3a3a3;
+}
+
+/* Agent pulse animation */
+@keyframes agent-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+.agent-pulse {
+  animation: agent-pulse 2s ease-in-out infinite;
+}
+
+/* RALPH gradient pill */
+@keyframes ralph-gradient {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.ralph-pill {
+  background: linear-gradient(135deg, #171717, #404040, #171717);
+  background-size: 200% 200%;
+  animation: ralph-gradient 3s ease infinite;
+}
+
+/* Code blocks */
+pre, code {
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
