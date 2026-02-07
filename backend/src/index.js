@@ -18,6 +18,7 @@ const TRiSM = require('../services/trism');
 const Paper2AgentService = require('../services/paper2agent');
 const Blockchain = require('../services/blockchain');
 const SwarmEngine = require('../services/swarm');
+const RepublicEngine = require('../services/republic-engine');
 
 // Route factories
 const kgRoutes = require('./routes/kg');
@@ -28,6 +29,7 @@ const trismRoutes = require('./routes/trism');
 const paper2agentRoutes = require('./routes/paper2agent');
 const blockchainRoutes = require('./routes/blockchain');
 const swarmRoutes = require('./routes/swarm');
+const republicRoutes = require('./routes/republic');
 
 const app = express();
 const PORT = 3001;
@@ -51,6 +53,7 @@ const trism = new TRiSM({ kg });
 const paper2agent = new Paper2AgentService({ kg, agentGateway, forensics });
 const blockchain = new Blockchain();
 const swarm = new SwarmEngine({ kg, agentGateway, dataOracle: oracle, forensics, paper2agent });
+const republic = new RepublicEngine({ kg, agentGateway, dataOracle: oracle, forensics, trism, wss });
 
 // Wire TRiSM into AgentGateway as post-response hook
 agentGateway.setTRiSMHook(async (agentId, content, context) => {
@@ -66,6 +69,7 @@ app.use('/api/trism', trismRoutes(trism));
 app.use('/api/papers', paper2agentRoutes(paper2agent));
 app.use('/api/blockchain', blockchainRoutes(blockchain));
 app.use('/api/swarm', swarmRoutes(swarm, wss));
+app.use('/api/republic', republicRoutes(republic, wss));
 
 // ——— Existing Kaggle pipeline routes ———
 
