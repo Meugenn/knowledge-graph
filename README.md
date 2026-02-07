@@ -4,6 +4,11 @@
 
 **Built at ETH Oxford 2026** | Powered by **Flare** & **Plasma**
 
+## 🌐 Live Demo
+**[https://knowledge-graph-delta.vercel.app](https://knowledge-graph-delta.vercel.app)**
+
+Try it now! Connect your wallet and explore the decentralized research platform.
+
 ---
 
 ## 🎯 The Problem
