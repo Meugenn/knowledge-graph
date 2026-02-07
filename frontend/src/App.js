@@ -5,6 +5,7 @@ import SubmitPaper from './components/SubmitPaper';
 import PaperList from './components/PaperList';
 import ReviewPanel from './components/ReviewPanel';
 import Stats from './components/Stats';
+import NetworkCheck from './components/NetworkCheck';
 import './App.css';
 
 function App() {
@@ -87,6 +88,7 @@ function App() {
 
   return (
     <div className="App">
+      <NetworkCheck provider={provider} />
       <header className="header">
         <div className="container">
           <div className="header-content">

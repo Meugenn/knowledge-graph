@@ -1,4 +1,4 @@
-// Contract addresses - update after deployment
+// Contract addresses - localhost deployment
 export const CONTRACTS = {
   RESEARCH_GRAPH: process.env.REACT_APP_RESEARCH_GRAPH || '0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82',
   RESEARCH_TOKEN: process.env.REACT_APP_RESEARCH_TOKEN || '0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0',
