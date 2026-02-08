@@ -1,5 +1,6 @@
 // Polymarket integration via backend proxy
-const BACKEND = "http://localhost:3001";
+import { BACKEND_URL } from '../config';
+const BACKEND = BACKEND_URL;
 const POLYMARKET_BASE = "https://polymarket.com/event";
 
 // Parse a JSON string field that might already be an array

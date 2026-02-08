@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { getPaperInfo } from '../utils/paperTechniqueMap';
+import { BACKEND_URL } from '../config';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -42,7 +43,7 @@ const KaggleLab = () => {
   const fetchKnowledgeGraph = useCallback(async () => {
     if (!competition) return;
     try {
-      const response = await fetch(`http://localhost:3001/api/kaggle/knowledge-graph/${competition}`);
+      const response = await fetch(`${BACKEND_URL}/api/kaggle/knowledge-graph/${competition}`);
       if (response.ok) {
         const kg = await response.json();
         setKnowledgeGraph(kg);
@@ -53,7 +54,8 @@ const KaggleLab = () => {
   }, [competition]);
 
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:3001');
+    const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => console.log('Connected to WebSocket');
 
@@ -207,7 +209,7 @@ const KaggleLab = () => {
     setIsRunning(true);
 
     try {
-      const response = await fetch('http://localhost:3001/api/kaggle/start', {
+      const response = await fetch(`${BACKEND_URL}/api/kaggle/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ competition: competition.trim(), apiToken: apiToken.trim() }),
@@ -224,7 +226,7 @@ const KaggleLab = () => {
   const downloadSubmission = async () => {
     if (!competition) return;
     try {
-      const response = await fetch(`http://localhost:3001/api/kaggle/submission/${competition}`);
+      const response = await fetch(`${BACKEND_URL}/api/kaggle/submission/${competition}`);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');

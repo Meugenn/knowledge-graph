@@ -2,8 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link2, ArrowRightLeft, Wallet, Activity, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { FadeIn } from '@/components/ui/fade-in';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+import { BACKEND_URL } from '../config';
 
 const DEMO_EVENTS = [
   { id: 'evt-1', chain: 'human', type: 'PaperSubmitted', data: { paperId: 1, author: '0x742d...4a3e' }, timestamp: new Date(Date.now() - 3600000).toISOString() },
