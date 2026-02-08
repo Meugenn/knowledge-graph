@@ -210,8 +210,9 @@ app.post('/api/kaggle/start', async (req, res) => {
 
   (async () => {
     try {
-      const kaggleEnv = apiToken ? { KAGGLE_API_TOKEN: apiToken } : {};
-      await runPythonScript('kaggle_downloader.py', [competition, apiToken || '', dataDir], sessionId, 'download', kaggleEnv);
+      const effectiveToken = apiToken || process.env.KAGGLE_API_TOKEN || '';
+      const kaggleEnv = effectiveToken ? { KAGGLE_API_TOKEN: effectiveToken } : {};
+      await runPythonScript('kaggle_downloader.py', [competition, effectiveToken, dataDir], sessionId, 'download', kaggleEnv);
       await runPythonScript('data_analyzer.py', [dataDir, competition], sessionId, 'explore');
       await runExperimentRunner([dataDir, submissionsDir, competition], sessionId, kaggleEnv);
       activeSessions.get(sessionId).status = 'completed';
