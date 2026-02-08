@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { FadeIn } from '@/components/ui/fade-in';
 import {
   Trophy, Rocket, Download, RefreshCw, Clock, Check, X, AlertCircle,
-  BookOpen, BarChart3, Brain, FileText, Loader2
+  BookOpen, BarChart3, Brain, FileText, Loader2, ServerOff
 } from 'lucide-react';
 
 const PIPELINE_STEPS = [
@@ -20,9 +20,11 @@ const PIPELINE_STEPS = [
 ];
 
 const KaggleLab = () => {
+  const [backendOnline, setBackendOnline] = useState(null); // null = checking, true/false
   const [competition, setCompetition] = useState('');
   const [apiToken, setApiToken] = useState('');
   const [sessionId, setSessionId] = useState(null);
+  const [error, setError] = useState(null);
   const [stages, setStages] = useState({
     download: { status: 'pending', logs: [] },
     explore: { status: 'pending', logs: [] },
@@ -53,7 +55,21 @@ const KaggleLab = () => {
     }
   }, [competition]);
 
+  // Check if backend is reachable
   useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/kaggle/sessions`, { signal: AbortSignal.timeout(3000) });
+        setBackendOnline(res.ok);
+      } catch {
+        setBackendOnline(false);
+      }
+    };
+    check();
+  }, []);
+
+  useEffect(() => {
+    if (backendOnline === false) return;
     const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
     const ws = new WebSocket(wsUrl);
 
@@ -189,7 +205,7 @@ const KaggleLab = () => {
 
   const startPipeline = async () => {
     if (!competition.trim()) {
-      alert('Please enter a competition name');
+      setError('Please enter a competition name.');
       return;
     }
 
@@ -216,9 +232,11 @@ const KaggleLab = () => {
       });
       const data = await response.json();
       setSessionId(data.sessionId);
-    } catch (error) {
-      console.error('Error starting pipeline:', error);
-      alert('Failed to start pipeline. Make sure backend is running on port 3001');
+      setError(null);
+    } catch (err) {
+      console.error('Error starting pipeline:', err);
+      setError('Could not reach backend. Kaggle Lab requires the backend server to be running.');
+      setBackendOnline(false);
       setIsRunning(false);
     }
   };
@@ -299,6 +317,27 @@ const KaggleLab = () => {
         </p>
       </div>
 
+      {/* Backend status banner */}
+      {backendOnline === false && (
+        <div className="flex items-center gap-3 border border-amber-200 bg-amber-50 p-4">
+          <ServerOff className="w-5 h-5 text-amber-600 flex-shrink-0" />
+          <div>
+            <div className="text-sm font-medium text-amber-800">Backend server not available</div>
+            <div className="text-xs text-amber-600 mt-0.5">
+              Kaggle Lab requires the backend server running locally. Start it with <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">cd backend && npm start</code>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && (
+        <div className="flex items-center gap-2 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
       {/* Control Panel */}
       <div className="border border-neutral-200 bg-white p-5 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -333,7 +372,7 @@ const KaggleLab = () => {
           <Button
             variant="default"
             onClick={startPipeline}
-            disabled={isRunning}
+            disabled={isRunning || backendOnline === false}
           >
             {isRunning ? (
               <>
