@@ -586,7 +586,7 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
   }, []);
 
   return (
-    <div className="flex flex-col w-full overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
+    <div className="flex flex-col w-full overflow-auto" style={{ height: 'calc(100vh - 120px)' }}>
       {/* Toolbar — always visible: search + action buttons in one compact row */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-200 bg-white flex-shrink-0">
         {/* Search */}

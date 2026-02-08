@@ -180,6 +180,8 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const [provider, setProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE) || 'claude');
   const [apiUrl, setApiUrl] = useState(() => localStorage.getItem(API_URL_STORAGE) || '');
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_STORAGE) || '');
+  // Separate state for setup form so typing doesn't unmount the screen
+  const [inputKey, setInputKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -426,8 +428,8 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
               <Input
                 type="password"
                 placeholder={PROVIDERS[provider]?.placeholder || 'API key...'}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
               />
             </div>
             {provider === 'custom' && (
@@ -444,8 +446,8 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             </div>
             <Button
               className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest"
-              onClick={() => saveApiKey(apiKey)}
-              disabled={!apiKey.trim()}
+              onClick={() => saveApiKey(inputKey)}
+              disabled={!inputKey.trim()}
             >
               Connect
             </Button>
