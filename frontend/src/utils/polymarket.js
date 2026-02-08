@@ -1,6 +1,5 @@
-// Polymarket integration via backend proxy
+// Polymarket integration — tries same-origin serverless function first, then backend proxy
 import { BACKEND_URL } from '../config';
-const BACKEND = BACKEND_URL;
 const POLYMARKET_BASE = "https://polymarket.com/event";
 
 // Parse a JSON string field that might already be an array
@@ -17,16 +16,32 @@ function parseJsonField(raw, fallback = []) {
   return fallback;
 }
 
+async function fetchEventsRaw(limit) {
+  // Try 1: same-origin Vercel serverless function (works on Vercel deployment)
+  try {
+    const res = await fetch(`/api/polymarket/events?limit=${limit}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+    }
+  } catch {}
+
+  // Try 2: Express backend proxy (works in local dev)
+  if (BACKEND_URL) {
+    const res = await fetch(`${BACKEND_URL}/api/polymarket/events?limit=${limit}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+    }
+  }
+
+  return [];
+}
+
 export async function fetchPolymarketEvents({ limit = 30 } = {}) {
   try {
-    const res = await fetch(`${BACKEND}/api/polymarket/events?limit=${limit}`);
-    if (!res.ok) throw new Error(`Backend ${res.status}`);
-    const events = await res.json();
-
-    if (!Array.isArray(events)) {
-      console.error("Polymarket: unexpected response", events);
-      return [];
-    }
+    const events = await fetchEventsRaw(limit);
+    if (events.length === 0) return [];
 
     return events.slice(0, limit).map((event) => {
       const market = event.markets?.[0];
