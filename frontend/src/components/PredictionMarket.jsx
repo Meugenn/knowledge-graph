@@ -512,32 +512,7 @@ function PredictionMarket({ contracts, account }) {
                   {papers && papers.length === 0 && (
                     <div className="text-neutral-400 text-xs italic py-2">No closely related papers found.</div>
                   )}
-                  {papers && papers.map((paper, j) => (
-                    <div key={paper.paperId || j} className="flex flex-col gap-1 border-b border-neutral-100 pb-2 last:border-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <a
-                            href={`https://www.semanticscholar.org/paper/${paper.paperId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-medium text-neutral-800 hover:text-blue-600 transition-colors line-clamp-2"
-                          >
-                            {paper.title}
-                          </a>
-                          <div className="text-[10px] text-neutral-400 font-mono mt-0.5">
-                            {paper.authors?.slice(0, 3).map(a => typeof a === 'string' ? a : a.name).join(', ')}
-                            {paper.authors?.length > 3 ? ' et al.' : ''} ({paper.year})
-                          </div>
-                        </div>
-                        <Badge variant="outline" className="text-[8px] font-mono flex-shrink-0">
-                          {(paper.citationCount || 0).toLocaleString()} cites
-                        </Badge>
-                      </div>
-                      {paper.tldr?.text && (
-                        <p className="text-[11px] text-neutral-500 italic line-clamp-2">{paper.tldr.text}</p>
-                      )}
-                    </div>
-                  ))}
+                  {papers && papers.map((paper, j) => renderPaperCard(paper, j))}
                 </div>
               </motion.div>
             )}
