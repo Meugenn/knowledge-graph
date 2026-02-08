@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { FadeIn } from '@/components/ui/fade-in';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Play, Pause, BrainCircuit, Import, Compass, Download } from 'lucide-react';
+import { Play, Pause, BrainCircuit, Import, Compass, Download, Upload } from 'lucide-react';
 
 // Field-based color mapping — covers both Semantic Scholar and OpenAlex field names
 const FIELD_COLORS = {
@@ -663,6 +663,69 @@ function KnowledgeGraph({ contracts, account, onImportPaper, onMakeRunnable, onR
           <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Color by field</span>
         </div>
         <div className="flex items-center gap-2 ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.json';
+              input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  try {
+                    const data = JSON.parse(ev.target.result);
+                    const papers = data.papers || data.nodes || [];
+                    const citations = data.citations || data.links || [];
+                    if (papers.length === 0) return;
+                    setGraphData(prev => {
+                      const nodeMap = new Map();
+                      prev.nodes.forEach(n => nodeMap.set(n.id, n));
+                      papers.forEach(p => {
+                        if (!nodeMap.has(p.id)) {
+                          nodeMap.set(p.id, {
+                            ...p,
+                            paperId: p.paperId || p.id,
+                            val: Math.max(2, Math.log10((p.citationCount || 1) + 1) * 3),
+                            source: p.source || 'imported',
+                          });
+                        }
+                      });
+                      const linkSet = new Set();
+                      const allLinks = [];
+                      prev.links.forEach(l => {
+                        const src = typeof l.source === 'object' ? l.source.id : l.source;
+                        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+                        linkSet.add(`${src}->${tgt}`);
+                        allLinks.push(l);
+                      });
+                      const nodeIds = new Set(nodeMap.keys());
+                      citations.forEach(c => {
+                        const src = typeof c.source === 'object' ? c.source.id : c.source;
+                        const tgt = typeof c.target === 'object' ? c.target.id : c.target;
+                        const key = `${src}->${tgt}`;
+                        if (!linkSet.has(key) && nodeIds.has(src) && nodeIds.has(tgt)) {
+                          linkSet.add(key);
+                          allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
+                        }
+                      });
+                      return { nodes: Array.from(nodeMap.values()), links: allLinks };
+                    });
+                  } catch (err) {
+                    console.error('Import failed:', err);
+                  }
+                };
+                reader.readAsText(file);
+              };
+              input.click();
+            }}
+            className="font-mono text-xs uppercase tracking-widest"
+          >
+            <Upload className="mr-1.5 h-3.5 w-3.5" />
+            Import
+          </Button>
           <Button
             variant="outline"
             size="sm"
