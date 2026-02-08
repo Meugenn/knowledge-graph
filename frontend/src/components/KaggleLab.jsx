@@ -319,12 +319,14 @@ const KaggleLab = () => {
 
       {/* Backend status banner */}
       {backendOnline === false && (
-        <div className="flex items-center gap-3 border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-3 border border-amber-200 bg-amber-50 p-4 rounded-lg">
           <ServerOff className="w-5 h-5 text-amber-600 flex-shrink-0" />
           <div>
-            <div className="text-sm font-medium text-amber-800">Backend server not available</div>
+            <div className="text-sm font-medium text-amber-800">AI Kaggle Lab Unavailable</div>
             <div className="text-xs text-amber-600 mt-0.5">
-              Kaggle Lab requires the backend server running locally. Start it with <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">cd backend && npm start</code>
+              The Kaggle Lab requires backend services (Python ML agents + WebSocket coordination).
+              {' '}For local development: <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">cd backend && npm start</code>
+              {' '}For production: Deploy backend to Railway/Render and set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> in Vercel.
             </div>
           </div>
         </div>
