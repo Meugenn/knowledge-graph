@@ -274,7 +274,7 @@ Write Lean 4 theorem statements for the 2-4 most important claims. Include impor
   },
 ];
 
-function defaultParse(rawText) {
+export function defaultParse(rawText) {
   // Try direct JSON parse
   try {
     return JSON.parse(rawText);

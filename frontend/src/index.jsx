@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { PrivyProvider } from '@privy-io/react-auth';
 import './globals.css';
 import App from './App';
+import { PRIVY_APP_ID, PRIVY_CLIENT_ID } from './config';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -33,10 +35,29 @@ class ErrorBoundary extends React.Component {
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+
+const appContent = PRIVY_APP_ID ? (
+  <PrivyProvider
+    appId={PRIVY_APP_ID}
+    clientId={PRIVY_CLIENT_ID || undefined}
+    config={{
+      loginMethods: ['email', 'google', 'github', 'wallet'],
+      appearance: { theme: 'light' },
+      embeddedWallets: {
+        ethereum: { createOnLogin: 'users-without-wallets' },
+      },
+    }}
+  >
+    <App />
+  </PrivyProvider>
+) : (
+  <App />
+);
+
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      {appContent}
     </ErrorBoundary>
   </React.StrictMode>
 );

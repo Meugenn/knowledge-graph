@@ -22,7 +22,8 @@ class SemanticScholarSource {
       if (!res.ok) throw new Error(`S2 API error: ${res.status}`);
       const data = await res.json();
       return (data.data || []).map(p => ({ ...p, source: 'semanticScholar' }));
-    } catch {
+    } catch (err) {
+      console.warn('[S2Source] API search failed:', err.message);
       return this._mockSearch(query);
     }
   }
@@ -36,7 +37,8 @@ class SemanticScholarSource {
       const res = await fetch(url, { headers });
       if (!res.ok) throw new Error(`S2 API error: ${res.status}`);
       return await res.json();
-    } catch {
+    } catch (err) {
+      console.warn('[S2Source] getDetails failed:', err.message);
       if (this.mockData) {
         return this.mockData.papers.find(p => p.paperId === paperId) || null;
       }

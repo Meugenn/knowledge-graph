@@ -96,10 +96,11 @@ const KaggleLab = () => {
       // Handle paper-matched events
       if (data.event === 'paper_matched') {
         setMatchedPapers(prev => [...prev, {
-          paperId: data.paperId,
-          paperTitle: data.paperTitle,
+          paperId: data.paperId || data.paper_id,
+          paperTitle: data.paperTitle || data.paper_title,
           technique: data.technique,
           reason: data.reason,
+          source: data.source || 'registry',
         }]);
       }
 
@@ -228,7 +229,13 @@ const KaggleLab = () => {
       const response = await fetch(`${BACKEND_URL}/api/kaggle/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competition: competition.trim(), apiToken: apiToken.trim() }),
+        body: JSON.stringify({
+          competition: competition.trim(),
+          apiToken: apiToken.trim(),
+          llmProvider: localStorage.getItem('rg_llm_provider') || '',
+          llmModel: localStorage.getItem('rg_llm_model') || '',
+          userApiKey: sessionStorage.getItem('rg_llm_apikey') || '',
+        }),
       });
       const data = await response.json();
       setSessionId(data.sessionId);
@@ -451,11 +458,12 @@ const KaggleLab = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {matchedPapers.map((paper, idx) => {
                 const info = getPaperInfo(paper.paperId);
+                const isAI = paper.source === 'ai';
                 return (
                   <div
                     key={idx}
                     className="border border-neutral-200 bg-white p-4 space-y-2"
-                    style={{ borderLeftWidth: 3, borderLeftColor: info.color }}
+                    style={{ borderLeftWidth: 3, borderLeftColor: isAI ? '#8b5cf6' : info.color }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="space-y-0.5 min-w-0">
@@ -466,13 +474,24 @@ const KaggleLab = () => {
                           {paper.paperId}
                         </span>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] shrink-0"
-                        style={{ background: info.color + '20', color: info.color, borderColor: info.color + '40' }}
-                      >
-                        {info.tag}
-                      </Badge>
+                      <div className="flex gap-1 shrink-0">
+                        {isAI && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px]"
+                            style={{ background: '#8b5cf620', color: '#8b5cf6', borderColor: '#8b5cf640' }}
+                          >
+                            AI
+                          </Badge>
+                        )}
+                        <Badge
+                          variant="outline"
+                          className="text-[10px]"
+                          style={{ background: info.color + '20', color: info.color, borderColor: info.color + '40' }}
+                        >
+                          {info.tag}
+                        </Badge>
+                      </div>
                     </div>
                     <p className="text-sm text-neutral-500 font-light leading-relaxed">
                       {paper.reason}

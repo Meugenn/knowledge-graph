@@ -12,10 +12,13 @@ class AgentGateway {
     this.walletManager = new WalletManager(opts.wallets);
     this.trismHook = null;
 
-    // Load mock responses
+    // Load mock responses (optional - fixtures removed for production)
     const mockPath = path.join(__dirname, '../../fixtures/llm-responses.json');
     if (fs.existsSync(mockPath)) {
       this.mockResponses = JSON.parse(fs.readFileSync(mockPath, 'utf8'));
+    } else {
+      console.log('ℹ️  Mock responses fixture not found - using default mock responses');
+      this.mockResponses = {};
     }
 
     // Initialise provider
@@ -33,12 +36,14 @@ class AgentGateway {
       this.provider = new MockProvider(this.mockResponses);
     }
 
-    // Load agent definitions from seed
+    // Load agent definitions from seed (optional - fixtures removed for production)
     this.agents = new Map();
     const seedPath = path.join(__dirname, '../../fixtures/demo-seed.json');
     if (fs.existsSync(seedPath)) {
       const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
       (seed.agents || []).forEach(a => this.agents.set(a.id, a));
+    } else {
+      console.log('ℹ️  Agent seed fixture not found - starting with empty agent registry');
     }
   }
 

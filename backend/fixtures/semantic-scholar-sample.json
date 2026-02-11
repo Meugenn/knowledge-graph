@@ -1,9 +1,0 @@
-{
-  "papers": [
-    { "paperId": "204e3073870fae3d05bcbc2f6a8e263d9b72e776", "title": "Attention Is All You Need", "citationCount": 120000, "influentialCitationCount": 8500, "tldr": "A new network architecture based solely on attention mechanisms." },
-    { "paperId": "df2b0e26d0599ce3e70df8a9da02e51594e0e992", "title": "BERT: Pre-training of Deep Bidirectional Transformers", "citationCount": 85000, "influentialCitationCount": 6200, "tldr": "BERT obtains new state-of-the-art results on eleven NLP tasks." },
-    { "paperId": "6b85b63579a916f705a8e10a49bd8d849d91b1fc", "title": "Language Models are Few-Shot Learners", "citationCount": 35000, "influentialCitationCount": 3100, "tldr": "GPT-3 demonstrates strong few-shot performance across benchmarks." },
-    { "paperId": "8388f1be26329fa45e5807e968a641ce170df6c6", "title": "Generative Adversarial Networks", "citationCount": 65000, "influentialCitationCount": 4800, "tldr": "A framework for training generative models via adversarial training." },
-    { "paperId": "3d2c4d5e2c3e5f6a7b8c9d0e1f2a3b4c5d6e7f8a", "title": "Deep Residual Learning for Image Recognition", "citationCount": 190000, "influentialCitationCount": 12000, "tldr": "ResNets ease training of substantially deeper networks." }
-  ]
-}

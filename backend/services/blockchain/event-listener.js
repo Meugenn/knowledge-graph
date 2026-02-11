@@ -15,15 +15,6 @@ class EventListener {
     ];
   }
 
-  addEvent(event) {
-    this.events.push({
-      id: `evt-${Date.now()}`,
-      ...event,
-      timestamp: new Date().toISOString(),
-    });
-    if (this.events.length > 200) this.events = this.events.slice(-200);
-  }
-
   getEvents(limit = 20) {
     return this.events.slice(-limit).reverse();
   }

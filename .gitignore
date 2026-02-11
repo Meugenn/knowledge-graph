@@ -11,10 +11,13 @@ build/
 # Frontend
 frontend/node_modules/
 frontend/build/
+frontend/.env
 frontend/.env.local
+frontend/.env.*.local
 
 # Backend
 backend/node_modules/
+backend/.env
 backend/data/
 backend/submissions/
 backend/package-lock.json
@@ -22,6 +25,8 @@ backend/package-lock.json
 
 # OS
 .DS_Store
+Thumbs.db
+desktop.ini
 *.swp
 *.swo
 
@@ -30,3 +35,7 @@ backend/package-lock.json
 .idea/
 .vercel
 __pycache__/
+
+# Temp files
+tmpclaude-*
+*.tmp

@@ -54,6 +54,85 @@ export const SAMPLE_COLLECTIONS = [
       { filter: 'default.search:brain computer interface decoding', label: 'BCI', pages: 1 },
     ],
   },
+  // ── Social Sciences & Economics ──────────────────────────────
+  {
+    id: 'economics',
+    label: 'Economics & Finance (SSRN/RePEc)',
+    description: 'Behavioral economics, financial economics, macroeconomics, game theory, econometrics',
+    type: 'openalex',
+    queries: [
+      { filter: 'default.search:behavioral economics prospect theory nudge', label: 'Behavioral Econ', pages: 2 },
+      { filter: 'default.search:financial economics asset pricing risk', label: 'Financial Econ', pages: 2 },
+      { filter: 'default.search:macroeconomics monetary policy inflation', label: 'Macroeconomics', pages: 2 },
+      { filter: 'default.search:game theory mechanism design auction', label: 'Game Theory', pages: 1 },
+      { filter: 'default.search:econometrics causal inference regression', label: 'Econometrics', pages: 2 },
+      { filter: 'default.search:labor economics wages employment', label: 'Labor Economics', pages: 1 },
+      { filter: 'default.search:international trade tariff comparative advantage', label: 'Trade', pages: 1 },
+    ],
+  },
+  {
+    id: 'polisci',
+    label: 'Political Science (JSTOR)',
+    description: 'Democratic institutions, international relations, political economy, comparative politics',
+    type: 'openalex',
+    queries: [
+      { filter: 'default.search:democratic institutions electoral systems voting', label: 'Democracy', pages: 2 },
+      { filter: 'default.search:international relations conflict cooperation diplomacy', label: 'Int. Relations', pages: 2 },
+      { filter: 'default.search:political economy inequality redistribution welfare', label: 'Political Economy', pages: 2 },
+      { filter: 'default.search:comparative politics regime authoritarian', label: 'Comparative Politics', pages: 1 },
+      { filter: 'default.search:public policy governance regulation', label: 'Public Policy', pages: 1 },
+    ],
+  },
+  {
+    id: 'sociology',
+    label: 'Sociology',
+    description: 'Social inequality, social networks, migration, urban sociology, cultural sociology',
+    type: 'openalex',
+    queries: [
+      { filter: 'default.search:social inequality stratification mobility class', label: 'Inequality', pages: 2 },
+      { filter: 'default.search:social network analysis community ties', label: 'Social Networks', pages: 1 },
+      { filter: 'default.search:immigration migration integration assimilation', label: 'Migration', pages: 2 },
+      { filter: 'default.search:urban sociology gentrification neighborhood', label: 'Urban Sociology', pages: 1 },
+      { filter: 'default.search:race ethnicity discrimination sociology', label: 'Race & Ethnicity', pages: 1 },
+    ],
+  },
+  {
+    id: 'dev-economics',
+    label: 'Development Economics (World Bank/NBER)',
+    description: 'Poverty, RCTs, economic growth, World Bank policy research, NBER working papers',
+    type: 'openalex',
+    queries: [
+      // OpenAlex — development economics core topics
+      { filter: 'default.search:development economics poverty reduction intervention', label: 'Poverty', pages: 2 },
+      { filter: 'default.search:randomized controlled trial development economics', label: 'RCTs', pages: 2 },
+      { filter: 'default.search:economic growth institutions developing countries', label: 'Growth', pages: 2 },
+      { filter: 'default.search:microfinance financial inclusion developing', label: 'Microfinance', pages: 1 },
+      { filter: 'default.search:foreign aid effectiveness development', label: 'Aid & Development', pages: 1 },
+      // World Bank API — policy research documents
+      { source: 'worldbank', filter: 'poverty reduction economic development', label: 'World Bank: Poverty', pages: 2 },
+      { source: 'worldbank', filter: 'climate change developing countries policy', label: 'World Bank: Climate', pages: 1 },
+      { source: 'worldbank', filter: 'education human capital development', label: 'World Bank: Education', pages: 1 },
+      // Crossref — NBER working papers (prefix 10.3386)
+      { source: 'crossref', filter: 'development economics poverty', label: 'NBER: Development', pages: 1, prefix: '10.3386' },
+      { source: 'crossref', filter: 'economic growth institutions', label: 'NBER: Growth', pages: 1, prefix: '10.3386' },
+    ],
+  },
+  {
+    id: 'nber-working',
+    label: 'NBER Working Papers',
+    description: 'National Bureau of Economic Research: macro, labor, public finance, health economics',
+    type: 'openalex',
+    queries: [
+      // Crossref with NBER DOI prefix for direct NBER papers
+      { source: 'crossref', filter: 'macroeconomics monetary policy', label: 'NBER: Macro', pages: 1, prefix: '10.3386' },
+      { source: 'crossref', filter: 'labor economics wages employment', label: 'NBER: Labor', pages: 1, prefix: '10.3386' },
+      { source: 'crossref', filter: 'public finance taxation government', label: 'NBER: Public Finance', pages: 1, prefix: '10.3386' },
+      { source: 'crossref', filter: 'health economics insurance', label: 'NBER: Health', pages: 1, prefix: '10.3386' },
+      { source: 'crossref', filter: 'international trade finance', label: 'NBER: Trade', pages: 1, prefix: '10.3386' },
+      // OpenAlex fallback for broader NBER-related content
+      { filter: 'default.search:NBER working paper economics', label: 'NBER via OpenAlex', pages: 2 },
+    ],
+  },
   {
     id: 'full-import',
     label: 'Full OpenAlex Import',

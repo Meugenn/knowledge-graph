@@ -5,7 +5,7 @@ class Bridge {
     this.transfers = [];
   }
 
-  async mirrorEvent(event) {
+  mirrorEvent(event) {
     const transfer = {
       id: `bridge_${Date.now()}`,
       from: event.chain || 'human',

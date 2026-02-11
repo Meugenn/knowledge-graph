@@ -1,5 +1,6 @@
 import { SEMANTIC_SCHOLAR } from '../config';
 import { getSeedGraphData } from './seedData';
+import { normalizeS2Paper } from './normalization';
 
 // In-memory cache
 const cache = new Map();
@@ -15,26 +16,8 @@ async function rateLimit() {
   lastRequestTime = Date.now();
 }
 
-export function normalizeS2Paper(paper) {
-  return {
-    id: paper.paperId,
-    paperId: paper.paperId,
-    title: paper.title || 'Untitled',
-    authors: (paper.authors || []).map(a => a.name || a),
-    year: paper.year,
-    citationCount: paper.citationCount || 0,
-    influentialCitationCount: paper.influentialCitationCount || 0,
-    abstract: paper.abstract || '',
-    tldr: paper.tldr?.text || '',
-    fieldsOfStudy: paper.fieldsOfStudy || [],
-    doi: paper.externalIds?.DOI || null,
-    arxivId: paper.externalIds?.ArXiv || null,
-    source: 'semantic_scholar',
-    references: (paper.references || []).filter(r => r.paperId).map(r => r.paperId),
-    citations: (paper.citations || []).filter(c => c.paperId).map(c => c.paperId),
-    val: Math.max(3, Math.log10((paper.citationCount || 0) + 1) * 3),
-  };
-}
+// Re-export for consumers that import from here
+export { normalizeS2Paper } from './normalization';
 
 // Authenticated fetch with API key + fallback chain
 async function s2Fetch(url, options = {}) {

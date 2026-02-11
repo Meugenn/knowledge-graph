@@ -34,20 +34,79 @@ const STOP_WORDS = new Set([
   'up', 'down', 'before', 'after', 'about', 'over', 'under', 'between',
   'through', 'during', 'into', 'out', 'what', 'which', 'who', 'whom',
   'how', 'when', 'where', 'why', 'not', 'no', 'yes', 'if', 'then',
+  // Prediction-market noise words
+  'win', 'lose', 'happen', 'occur', 'reach', 'hit', 'pass', 'fail',
+  'end', 'start', 'begin', 'next', 'new', 'become', 'remain', 'get',
+  'above', 'below', 'least', 'within', 'first', 'last', 'both',
+  'any', 'each', 'every', 'some', 'many', 'much', 'such',
+  'january', 'february', 'march', 'april', 'june', 'july',
+  'august', 'september', 'october', 'november', 'december',
+  'year', 'month', 'day', 'week', 'time', 'date', 'ago',
+  'percent', 'number', 'total', 'whether', 'announce', 'officially',
 ]);
 
 function extractKeywords(text) {
   return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w) && !/^\d+$/.test(w));
 }
 
-function extractSearchTerms(question) {
-  return extractKeywords(question).slice(0, 4).join(' ');
+// ─── Detect multi-word phrases that should stay together ──────────
+const BIGRAMS = [
+  'machine learning', 'deep learning', 'artificial intelligence',
+  'climate change', 'global warming', 'federal reserve', 'interest rate',
+  'natural language', 'neural network', 'public health', 'mental health',
+  'supply chain', 'real estate', 'foreign policy', 'economic growth',
+  'gene therapy', 'drug approval', 'clinical trial', 'renewable energy',
+  'quantum computing', 'autonomous vehicles', 'social media',
+  'central bank', 'fiscal policy', 'monetary policy',
+  'stock market', 'cryptocurrency', 'blockchain',
+  'supreme court', 'executive order', 'national security',
+  'trade war', 'debt ceiling', 'government shutdown',
+  'housing market', 'labor market', 'oil price',
+  'space exploration', 'nuclear energy', 'electric vehicle',
+  'generative ai', 'large language', 'foundation model',
+];
+
+function extractPhrases(text) {
+  const lower = (text || '').toLowerCase();
+  return BIGRAMS.filter(bg => lower.includes(bg));
+}
+
+// ─── Domain detection for field-aware scoring ─────────────────────
+const DOMAIN_SIGNALS = {
+  'Computer Science': ['ai', 'algorithm', 'software', 'computing', 'neural', 'model', 'data', 'gpt', 'llm', 'transformer', 'crypto', 'blockchain', 'bitcoin', 'ethereum', 'tech', 'app', 'platform'],
+  'Economics': ['gdp', 'inflation', 'recession', 'market', 'trade', 'tariff', 'fed', 'economy', 'fiscal', 'monetary', 'stock', 'price', 'currency', 'treasury', 'bond', 'debt', 'deficit'],
+  'Political Science': ['election', 'vote', 'poll', 'president', 'congress', 'senate', 'democrat', 'republican', 'party', 'campaign', 'legislation', 'governor', 'ballot', 'primary', 'inaugur'],
+  'Medicine': ['fda', 'drug', 'vaccine', 'trial', 'disease', 'health', 'patient', 'treatment', 'therapy', 'clinical', 'cancer', 'covid', 'pandemic', 'diagnosis', 'mortality'],
+  'Environmental Science': ['climate', 'carbon', 'emission', 'temperature', 'energy', 'renewable', 'solar', 'wind', 'fossil', 'wildfire', 'drought', 'sea level'],
+  'Physics': ['quantum', 'particle', 'fusion', 'cern', 'spacex', 'nasa', 'orbit', 'rocket', 'satellite'],
+  'Law': ['legal', 'court', 'ruling', 'lawsuit', 'regulation', 'compliance', 'antitrust', 'indictment', 'verdict'],
+};
+
+function detectDomains(text) {
+  const lower = (text || '').toLowerCase();
+  const matches = [];
+  for (const [field, signals] of Object.entries(DOMAIN_SIGNALS)) {
+    const hits = signals.filter(s => lower.includes(s)).length;
+    if (hits >= 1) matches.push({ field, hits });
+  }
+  return matches.sort((a, b) => b.hits - a.hits).map(m => m.field);
+}
+
+function extractSearchTerms(question, description) {
+  const fullText = `${question} ${description || ''}`;
+  const phrases = extractPhrases(fullText);
+  const keywords = extractKeywords(fullText)
+    .filter(w => !phrases.some(p => p.includes(w)));
+  const terms = [...phrases, ...keywords.slice(0, Math.max(2, 4 - phrases.length))];
+  return terms.join(' ').slice(0, 100);
 }
 
 // ─── Score and rank papers by relevance to a market question ──────
-function scoreAndRankPapers(papers, question) {
-  const qKeywords = extractKeywords(question);
+function scoreAndRankPapers(papers, question, description) {
+  const fullText = `${question} ${description || ''}`;
+  const qKeywords = extractKeywords(fullText);
+  const detectedDomains = detectDomains(fullText);
   if (qKeywords.length === 0) return papers.map(p => ({ ...p, relevance: 0, relevanceTag: '' }));
 
   const scored = papers.map(paper => {
@@ -59,7 +118,7 @@ function scoreAndRankPapers(papers, question) {
     for (const qk of qKeywords) {
       for (const tk of titleKeywords) {
         if (tk === qk) score += 3;
-        else if (tk.includes(qk) || qk.includes(tk)) score += 1.5;
+        else if (qk.length >= 4 && (tk.includes(qk) || qk.includes(tk))) score += 1.5;
       }
     }
 
@@ -67,7 +126,7 @@ function scoreAndRankPapers(papers, question) {
     for (const qk of qKeywords) {
       for (const ak of abstractKeywords) {
         if (ak === qk) score += 1;
-        else if (ak.includes(qk) || qk.includes(ak)) score += 0.3;
+        else if (qk.length >= 4 && (ak.includes(qk) || qk.includes(ak))) score += 0.3;
       }
     }
 
@@ -77,9 +136,21 @@ function scoreAndRankPapers(papers, question) {
     // Recency bonus (papers from last 3 years get a boost)
     if (paper.year && paper.year >= new Date().getFullYear() - 3) score += 1;
 
+    // Domain field match: boost papers in detected domains, penalize off-domain
+    const paperFields = (paper.fieldsOfStudy || []).map(f =>
+      typeof f === 'string' ? f.toLowerCase() : ''
+    );
+    if (detectedDomains.length > 0 && paperFields.length > 0) {
+      const fieldOverlap = detectedDomains.some(d =>
+        paperFields.some(pf => pf.includes(d.toLowerCase().split(' ')[0]))
+      );
+      if (fieldOverlap) score += 2;
+      else score *= 0.5;
+    }
+
     // Determine relevance tag
     let relevanceTag = '';
-    const titleHits = qKeywords.filter(qk => titleKeywords.some(tk => tk.includes(qk) || qk.includes(tk)));
+    const titleHits = qKeywords.filter(qk => titleKeywords.some(tk => tk === qk || (qk.length >= 4 && (tk.includes(qk) || qk.includes(tk)))));
     if (titleHits.length >= 2) relevanceTag = 'Direct match';
     else if (titleHits.length === 1) relevanceTag = 'Title overlap';
     else if (score > 2) relevanceTag = 'Related concepts';
@@ -136,25 +207,51 @@ function PredictionMarket({ contracts, account }) {
       setLoadingPoly(true);
       fetchPolymarketEvents({ limit: 10 })
         .then(events => setPolymarketEvents(events))
+        .catch(err => console.error('Polymarket fetch failed:', err))
         .finally(() => setLoadingPoly(false));
     }
   }, [source, polymarketEvents.length]);
 
   // Search for relevant academic papers for a market question, then rank by relevance
-  const findRelatedPapers = useCallback(async (marketId, question) => {
-    if (paperResults[marketId] || loadingPapers[marketId]) return;
-    setLoadingPapers(prev => ({ ...prev, [marketId]: true }));
+  const findRelatedPapers = useCallback(async (marketId, question, description) => {
+    setLoadingPapers(prev => {
+      if (prev[marketId]) return prev;
+      return { ...prev, [marketId]: true };
+    });
+    setPaperResults(prev => {
+      if (prev[marketId]) return prev;
+      return prev;
+    });
     try {
-      const terms = extractSearchTerms(question);
-      const results = await searchPapers(terms, 8);
-      const ranked = scoreAndRankPapers(results, question).slice(0, 5);
+      const fullTerms = extractSearchTerms(question, description);
+      const coreTerms = extractKeywords(question).slice(0, 2).join(' ');
+
+      // Two parallel searches — broad (with description context) + focused (core keywords)
+      const [broadResults, focusedResults] = await Promise.all([
+        searchPapers(fullTerms, 12),
+        coreTerms && coreTerms !== fullTerms ? searchPapers(coreTerms, 8) : Promise.resolve([]),
+      ]);
+
+      // Merge and deduplicate by paperId
+      const seen = new Set();
+      const merged = [];
+      for (const p of [...focusedResults, ...broadResults]) {
+        if (p.paperId && !seen.has(p.paperId)) {
+          seen.add(p.paperId);
+          merged.push(p);
+        }
+      }
+
+      const ranked = scoreAndRankPapers(merged, question, description)
+        .filter(p => p.relevance >= 20)
+        .slice(0, 5);
       setPaperResults(prev => ({ ...prev, [marketId]: ranked }));
     } catch (err) {
       console.error('Paper search failed:', err);
       setPaperResults(prev => ({ ...prev, [marketId]: [] }));
     }
     setLoadingPapers(prev => ({ ...prev, [marketId]: false }));
-  }, [paperResults, loadingPapers]);
+  }, []);
 
   const activeMarkets = markets.filter(m => !m.resolved);
   const resolvedMarkets = markets.filter(m => m.resolved);
@@ -240,7 +337,7 @@ function PredictionMarket({ contracts, account }) {
               className="font-mono text-[10px] uppercase tracking-widest h-10 px-4 rounded-none"
               onClick={() => {
                 setExpandedBet(isExpanded ? null : event.id);
-                if (!isExpanded) findRelatedPapers(event.id, event.question);
+                if (!isExpanded) findRelatedPapers(event.id, event.question, event.description);
               }}
             >
               <BookOpen className="h-3 w-3 mr-1.5" />
@@ -438,7 +535,7 @@ function PredictionMarket({ contracts, account }) {
               onClick={() => {
                 const wasExpanded = expandedBet === `papers_${market.id}`;
                 setExpandedBet(wasExpanded ? null : `papers_${market.id}`);
-                if (!wasExpanded) findRelatedPapers(market.id, market.question);
+                if (!wasExpanded) findRelatedPapers(market.id, market.question, '');
               }}
             >
               <BookOpen className="h-3 w-3 mr-1.5" />

@@ -4,11 +4,16 @@ function createOracleRoutes(dataOracle) {
   const router = express.Router();
 
   router.get('/search', async (req, res) => {
-    const { q, sources } = req.query;
-    if (!q) return res.status(400).json({ error: 'Query parameter q is required' });
-    const srcList = sources ? sources.split(',') : ['arxiv', 's2'];
-    const results = await dataOracle.search(q, srcList);
-    res.json(results);
+    try {
+      const { q, sources } = req.query;
+      if (!q) return res.status(400).json({ error: 'Query parameter q is required' });
+      const srcList = typeof sources === 'string' ? sources.split(',') : ['arxiv', 's2'];
+      const results = await dataOracle.search(q, srcList);
+      res.json(results);
+    } catch (err) {
+      console.error('[oracle/search] Error:', err.message);
+      res.status(500).json({ error: 'Oracle search failed' });
+    }
   });
 
   router.post('/ingest', async (req, res) => {

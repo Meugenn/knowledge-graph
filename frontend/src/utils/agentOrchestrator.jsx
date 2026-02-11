@@ -3,6 +3,7 @@
 
 import { AGENTS } from './agentDefinitions';
 import { callLLM } from './llm';
+import { estimateTokens, getContextLimits } from './tokenEstimator';
 
 /**
  * Build execution phases from agent dependency graph.
@@ -63,8 +64,16 @@ export async function runAgentPipeline(agents, papers, callbacks = {}) {
       const userMessage = agent.buildUserMessage(papers, outputs);
       const messages = [{ role: 'user', content: userMessage }];
 
+      // Smart maxTokens capping: prevent context overflow
+      const limits = getContextLimits();
+      const inputEst = estimateTokens(agent.systemPrompt) + estimateTokens(userMessage);
+      let effectiveMaxTokens = agent.maxTokens || 2000;
+      if (inputEst + effectiveMaxTokens > limits.contextWindow * 0.95) {
+        effectiveMaxTokens = Math.max(500, Math.floor(limits.contextWindow * 0.95 - inputEst));
+      }
+
       const rawText = await callLLM(agent.systemPrompt, messages, {
-        maxTokens: 2000,
+        maxTokens: effectiveMaxTokens,
         temperature: agent.temperature ?? 0.4,
       });
 

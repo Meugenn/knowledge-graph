@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { SEED_PAPERS } from '../utils/seedData';
 import { getRepoForPaper, getMCPConfig, getPaperIdsWithRepos } from '../utils/repoData';
 import ToolCard from './ToolCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { FadeIn } from '@/components/ui/fade-in';
-import { Check, FolderOpen, Star, Circle, Copy, Loader2, Play, Settings, FileCode, BookOpen, Package } from 'lucide-react';
+import { Check, FolderOpen, Star, Circle, Copy, Loader2, Play, Settings, FileCode, BookOpen, Package, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 const PHASES = [
   { key: 'discovery', label: 'Repository Discovery', duration: 1500 },
@@ -21,6 +23,13 @@ function Paper2Agent({ agentPaper }) {
   const [repo, setRepo] = useState(null);
   const [mcpConfig, setMcpConfig] = useState(null);
 
+  // Autocomplete search state
+  const [searchInput, setSearchInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [filteredPapers, setFilteredPapers] = useState([]);
+  const autocompleteRef = useRef(null);
+
   // Papers that have repos
   const papersWithRepos = SEED_PAPERS.filter(p => getPaperIdsWithRepos().includes(p.id));
 
@@ -30,6 +39,7 @@ function Paper2Agent({ agentPaper }) {
       const repoData = getRepoForPaper(agentPaper.id);
       if (repoData) {
         setSelectedPaper(agentPaper);
+        setSearchInput(`${agentPaper.title} (${agentPaper.year})`);
       }
     }
   }, [agentPaper]);
@@ -63,6 +73,35 @@ function Paper2Agent({ agentPaper }) {
     setTimeout(advancePhase, PHASES[0].duration);
   }, []);
 
+  // Filter papers by search query (title and authors)
+  const filterPapers = useCallback((query) => {
+    if (!query.trim()) {
+      return papersWithRepos;
+    }
+
+    const lowerQuery = query.toLowerCase();
+
+    return papersWithRepos.filter(paper => {
+      const titleMatch = paper.title.toLowerCase().includes(lowerQuery);
+      const authorsMatch = paper.authors.some(author =>
+        author.toLowerCase().includes(lowerQuery)
+      );
+      return titleMatch || authorsMatch;
+    });
+  }, [papersWithRepos]);
+
+  // Format authors for display (first 3, then "et al.")
+  const formatAuthors = (authors) => {
+    if (!authors || authors.length === 0) return 'Unknown authors';
+    if (authors.length <= 3) return authors.join(', ');
+    return `${authors.slice(0, 3).join(', ')}, et al.`;
+  };
+
+  // Update filtered papers when search input changes
+  useEffect(() => {
+    setFilteredPapers(filterPapers(searchInput));
+  }, [searchInput, filterPapers]);
+
   // Auto-start when paper arrives from graph
   useEffect(() => {
     if (agentPaper && agentPaper.id && getRepoForPaper(agentPaper.id)) {
@@ -70,12 +109,66 @@ function Paper2Agent({ agentPaper }) {
     }
   }, [agentPaper, startPipeline]);
 
-  const handlePaperSelect = (e) => {
-    const paper = papersWithRepos.find(p => p.id === e.target.value);
-    if (paper) {
-      startPipeline(paper);
+  // Handle paper selection from autocomplete
+  const handlePaperSelection = (paper) => {
+    setSelectedPaper(paper);
+    setSearchInput(`${paper.title} (${paper.year})`);
+    setShowSuggestions(false);
+    setFocusedIndex(-1);
+    startPipeline(paper);
+  };
+
+  // Handle keyboard navigation in autocomplete
+  const handleKeyDown = (e) => {
+    if (!showSuggestions) {
+      if (e.key === 'ArrowDown') {
+        setShowSuggestions(true);
+      }
+      return;
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusedIndex(prev =>
+          prev < filteredPapers.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusedIndex(prev => prev > 0 ? prev - 1 : -1);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (focusedIndex >= 0 && filteredPapers[focusedIndex]) {
+          handlePaperSelection(filteredPapers[focusedIndex]);
+        }
+        break;
+      case 'Escape':
+        e.preventDefault();
+        setShowSuggestions(false);
+        setFocusedIndex(-1);
+        break;
+      case 'Tab':
+        setShowSuggestions(false);
+        setFocusedIndex(-1);
+        break;
     }
   };
+
+  // Click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (autocompleteRef.current &&
+          !autocompleteRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+        setFocusedIndex(-1);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleCopy = () => {
     if (!mcpConfig) return;
@@ -154,22 +247,81 @@ function Paper2Agent({ agentPaper }) {
 
       {/* Paper Picker */}
       <div className="border border-neutral-200 bg-white p-4 space-y-2">
-        <label htmlFor="p2a-select" className="font-mono text-xs font-bold uppercase tracking-widest text-neutral-400">
+        <label className="font-mono text-xs font-bold uppercase tracking-widest text-neutral-400">
           Select a paper with code
         </label>
-        <select
-          id="p2a-select"
-          value={selectedPaper?.id || ''}
-          onChange={handlePaperSelect}
-          className="w-full h-9 border border-neutral-200 bg-white px-3 text-sm text-neutral-700 focus:outline-none focus:ring-1 focus:ring-neutral-400"
-        >
-          <option value="">-- Choose a paper --</option>
-          {papersWithRepos.map(p => (
-            <option key={p.id} value={p.id}>
-              {p.title} ({p.year})
-            </option>
-          ))}
-        </select>
+        <div className="relative" ref={autocompleteRef}>
+          <div className="relative">
+            <Input
+              type="text"
+              value={searchInput}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                setShowSuggestions(true);
+                setFocusedIndex(-1);
+              }}
+              onFocus={() => setShowSuggestions(true)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search by title or author..."
+              className="w-full bg-white border-neutral-200 font-light text-neutral-700 placeholder:text-neutral-400 pr-8"
+              autoComplete="off"
+              role="combobox"
+              aria-expanded={showSuggestions}
+              aria-controls="paper-suggestions"
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput('');
+                  setShowSuggestions(true);
+                  setFocusedIndex(-1);
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {showSuggestions && (
+            <ul
+              id="paper-suggestions"
+              role="listbox"
+              className="absolute z-50 w-full mt-1 max-h-80 overflow-y-auto bg-white border border-neutral-200 rounded-md shadow-lg"
+            >
+              {filteredPapers.length === 0 ? (
+                <li className="px-3 py-2 text-sm text-neutral-400 italic">
+                  No papers found matching "{searchInput}"
+                </li>
+              ) : (
+                filteredPapers.map((paper, index) => (
+                  <li
+                    key={paper.id}
+                    id={`paper-option-${index}`}
+                    role="option"
+                    aria-selected={focusedIndex === index}
+                    onClick={() => handlePaperSelection(paper)}
+                    className={cn(
+                      "px-3 py-2 cursor-pointer border-b border-neutral-100 last:border-0",
+                      focusedIndex === index
+                        ? "bg-neutral-100"
+                        : "hover:bg-neutral-50"
+                    )}
+                  >
+                    <div className="text-sm text-neutral-700 font-medium">
+                      {paper.title} ({paper.year})
+                    </div>
+                    <div className="text-xs text-neutral-500 mt-0.5">
+                      {formatAuthors(paper.authors)}
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
+          )}
+        </div>
       </div>
 
       {/* Pipeline */}

@@ -1,3 +1,4 @@
+/** @mock — No real GitHub API integration. Returns empty results. */
 class GitHubSource {
   constructor(opts = {}) {
     this.token = opts.token || process.env.GITHUB_TOKEN || '';

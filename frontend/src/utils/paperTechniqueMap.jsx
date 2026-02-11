@@ -127,6 +127,16 @@ const PAPER_TECHNIQUE_MAP = {
 };
 
 export function getPaperInfo(paperId) {
+  if (paperId && paperId.startsWith('ai_')) {
+    return {
+      paperTitle: paperId,
+      technique: paperId,
+      icon: '🤖',
+      tag: 'AI Suggested',
+      color: '#8b5cf6',
+      year: null,
+    };
+  }
   return PAPER_TECHNIQUE_MAP[paperId] || {
     paperTitle: paperId,
     technique: paperId,

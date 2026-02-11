@@ -485,7 +485,7 @@ Trust nothing. Verify everything.`);
         this._broadcast('papers_discovered', { query, count: added, kgSize: this.kg.getStats().paperCount });
       }
     } catch (err) {
-      // Silent fail on discovery — the Republic endures
+      this._log(`[Discovery] Error searching "${query}": ${err.message}`);
     }
   }
 

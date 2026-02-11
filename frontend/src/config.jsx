@@ -1,12 +1,17 @@
 // Backend URL
 export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
 
+// Privy Auth
+export const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID || '';
+export const PRIVY_CLIENT_ID = import.meta.env.VITE_PRIVY_CLIENT_ID || '';
+
 // Semantic Scholar API config
 export const SEMANTIC_SCHOLAR = {
   BASE_URL: 'https://api.semanticscholar.org/graph/v1',
   RECOMMENDATIONS_URL: 'https://api.semanticscholar.org/recommendations/v1',
-  PROXY_URL: 'https://api.allorigins.win/raw?url=',
-  API_KEY: import.meta.env.VITE_S2_API_KEY || '',
+  PROXY_URL: `${BACKEND_URL}/api/semantic-scholar`, // Use backend proxy for security
+  API_KEY: '', // API key removed - now handled by backend proxy
+  USE_BACKEND_PROXY: true, // Enable backend proxy for API calls
   FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,references,citations,tldr,influentialCitationCount',
   SEARCH_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',
   RECOMMENDATION_FIELDS: 'paperId,title,abstract,year,citationCount,authors,fieldsOfStudy,externalIds,tldr,influentialCitationCount',

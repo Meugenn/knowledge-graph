@@ -1,9 +1,0 @@
-{
-  "papers": [
-    { "arxivId": "1706.03762", "title": "Attention Is All You Need", "authors": ["Ashish Vaswani", "Noam Shazeer"], "abstract": "We propose a new simple network architecture, the Transformer.", "categories": ["cs.CL", "cs.LG"], "published": "2017-06-12" },
-    { "arxivId": "1810.04805", "title": "BERT: Pre-training of Deep Bidirectional Transformers", "authors": ["Jacob Devlin"], "abstract": "We introduce BERT.", "categories": ["cs.CL"], "published": "2018-10-11" },
-    { "arxivId": "2005.14165", "title": "Language Models are Few-Shot Learners", "authors": ["Tom Brown"], "abstract": "GPT-3 achieves strong performance.", "categories": ["cs.CL"], "published": "2020-05-28" },
-    { "arxivId": "1406.2661", "title": "Generative Adversarial Networks", "authors": ["Ian Goodfellow"], "abstract": "We propose GANs.", "categories": ["cs.LG", "stat.ML"], "published": "2014-06-10" },
-    { "arxivId": "2006.11239", "title": "Denoising Diffusion Probabilistic Models", "authors": ["Jonathan Ho"], "abstract": "High quality image synthesis using diffusion.", "categories": ["cs.LG", "cs.CV"], "published": "2020-06-19" }
-  ]
-}
