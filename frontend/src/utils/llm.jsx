@@ -1,7 +1,7 @@
 // Shared LLM calling utilities — routes all calls through backend proxy
 // API keys: server .env as fallback, user key from sessionStorage takes priority
 
-import { BACKEND_URL } from '../config';
+
 
 const PROVIDER_STORAGE = 'rg_llm_provider';
 const MODEL_STORAGE = 'rg_llm_model';
@@ -79,7 +79,7 @@ export async function callLLM(systemPrompt, userMessages, options = {}) {
   const effectiveModel = model || PROVIDERS[provider]?.defaultModel || '';
   const userApiKey = getStoredApiKey();
 
-  const response = await fetch(`${BACKEND_URL}/api/llm/chat`, {
+  const response = await fetch(`/api/llm/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

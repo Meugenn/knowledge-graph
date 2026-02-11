@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { FadeIn } from '@/components/ui/fade-in';
-import { BACKEND_URL } from '../config';
+
 
 const CASTE_ICONS = { guardian: '🛡️', philosopher: '⚔️', producer: '🔨' };
 const CASTE_COLOURS = { guardian: 'border-amber-300 bg-amber-50', philosopher: 'border-purple-300 bg-purple-50', producer: 'border-green-300 bg-green-50' };
@@ -21,10 +21,10 @@ function AgentCommandCentre() {
   const fetchAgents = useCallback(async () => {
     try {
       const [agentsRes, budgetRes, trismRes, papersRes] = await Promise.allSettled([
-        fetch(`${BACKEND_URL}/api/agents`).then(r => r.json()),
-        fetch(`${BACKEND_URL}/api/agents/budget`).then(r => r.json()),
-        fetch(`${BACKEND_URL}/api/trism/status`).then(r => r.json()),
-        fetch(`${BACKEND_URL}/api/kg/papers`).then(r => r.json()),
+        fetch(`/api/agents`).then(r => r.json()),
+        fetch(`/api/agents/budget`).then(r => r.json()),
+        fetch(`/api/trism/status`).then(r => r.json()),
+        fetch(`/api/kg/papers`).then(r => r.json()),
       ]);
       if (agentsRes.status === 'fulfilled') setAgents(agentsRes.value);
       if (budgetRes.status === 'fulfilled') setBudget(budgetRes.value);
@@ -67,7 +67,7 @@ Citations: ${selectedPaper.citationCount || 'Unknown'}
 
 Provide your analysis in your role as ${agent.role} (${agent.caste} caste). Be thorough but concise. Use British English.`;
 
-        const res = await fetch(`${BACKEND_URL}/api/agents/chat`, {
+        const res = await fetch(`/api/agents/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ agentId, task }),

@@ -1,5 +1,5 @@
-// Backend URL
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
+// Backend URL — empty string means same-origin (Vercel serverless functions)
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 // Privy Auth
 export const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID || '';

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link2, ArrowRightLeft, Wallet, Activity, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { FadeIn } from '@/components/ui/fade-in';
-import { BACKEND_URL } from '../config';
+
 
 const DEMO_EVENTS = [
   { id: 'evt-1', chain: 'human', type: 'PaperSubmitted', data: { paperId: 1, author: '0x742d...4a3e' }, timestamp: new Date(Date.now() - 3600000).toISOString() },
@@ -60,8 +60,8 @@ function ChainStatus() {
   const fetchChainData = useCallback(async () => {
     try {
       const [statusRes, eventsRes] = await Promise.allSettled([
-        fetch(`${BACKEND_URL}/api/blockchain/status`).then(r => r.json()),
-        fetch(`${BACKEND_URL}/api/blockchain/events`).then(r => r.json()),
+        fetch(`/api/blockchain/status`).then(r => r.json()),
+        fetch(`/api/blockchain/events`).then(r => r.json()),
       ]);
       if (statusRes.status === 'fulfilled') setChainData(statusRes.value);
       if (eventsRes.status === 'fulfilled') setEvents(eventsRes.value);

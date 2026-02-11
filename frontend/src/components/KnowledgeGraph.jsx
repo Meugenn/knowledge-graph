@@ -214,8 +214,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
         if (!cancelled && papers.length > 0) {
           setGraphData(prev => mergeOnChainPapers(prev, papers, account));
         }
-      } catch (e) {
-        console.log('Could not load on-chain papers:', e.message);
+      } catch {
+        // On-chain papers unavailable — expected when wallet not connected
       }
     }
     loadOnChain();

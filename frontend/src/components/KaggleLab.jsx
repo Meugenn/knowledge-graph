@@ -43,7 +43,7 @@ const KaggleLab = () => {
 
   // Fetch knowledge graph from API
   const fetchKnowledgeGraph = useCallback(async () => {
-    if (!competition) return;
+    if (!competition || !BACKEND_URL) return;
     try {
       const response = await fetch(`${BACKEND_URL}/api/kaggle/knowledge-graph/${competition}`);
       if (response.ok) {
@@ -55,8 +55,12 @@ const KaggleLab = () => {
     }
   }, [competition]);
 
-  // Check if backend is reachable
+  // Check if backend is reachable (Kaggle Lab requires a dedicated backend with Python)
   useEffect(() => {
+    if (!BACKEND_URL) {
+      setBackendOnline(false);
+      return;
+    }
     const check = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/kaggle/sessions`, { signal: AbortSignal.timeout(3000) });
@@ -69,11 +73,11 @@ const KaggleLab = () => {
   }, []);
 
   useEffect(() => {
-    if (backendOnline === false) return;
+    if (backendOnline === false || !BACKEND_URL) return;
     const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
     const ws = new WebSocket(wsUrl);
 
-    ws.onopen = () => console.log('Connected to WebSocket');
+    ws.onopen = () => {};
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -197,8 +201,8 @@ const KaggleLab = () => {
       }
     };
 
-    ws.onerror = (error) => console.error('WebSocket error:', error);
-    ws.onclose = () => console.log('WebSocket disconnected');
+    ws.onerror = () => {};
+    ws.onclose = () => {};
     wsRef.current = ws;
 
     return () => ws.close();
@@ -234,7 +238,6 @@ const KaggleLab = () => {
           apiToken: apiToken.trim(),
           llmProvider: localStorage.getItem('rg_llm_provider') || '',
           llmModel: localStorage.getItem('rg_llm_model') || '',
-          userApiKey: sessionStorage.getItem('rg_llm_apikey') || '',
         }),
       });
       const data = await response.json();
@@ -332,8 +335,8 @@ const KaggleLab = () => {
             <div className="text-sm font-medium text-amber-800">AI Kaggle Lab Unavailable</div>
             <div className="text-xs text-amber-600 mt-0.5">
               The Kaggle Lab requires backend services (Python ML agents + WebSocket coordination).
-              {' '}For local development: <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">cd backend && npm start</code>
-              {' '}For production: Deploy backend to Railway/Render and set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> in Vercel.
+              {' '}The Kaggle Lab requires a dedicated backend server with Python ML agents.
+              {' '}Set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> to your backend URL to enable this feature.
             </div>
           </div>
         </div>
