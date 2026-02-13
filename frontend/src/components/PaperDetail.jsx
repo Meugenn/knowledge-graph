@@ -1,12 +1,12 @@
 import React from 'react';
-import { X, ExternalLink, Play, FlaskConical, ArrowUpRight } from 'lucide-react';
+import { X, ExternalLink, Play, FlaskConical, ArrowUpRight, Trash2 } from 'lucide-react';
 import { GRAPH_COLORS } from '../config';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import EvaluationDisplay from './EvaluationDisplay';
 
-function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, evaluations }) {
+function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, onRemove, evaluations }) {
   if (!paper) return null;
 
   const sourceLabel = paper.onChain ? 'On-Chain' : paper.source === 'seed' ? 'Seed' : 'Semantic Scholar';
@@ -15,7 +15,7 @@ function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, ev
   return (
     <div className="fixed inset-0 z-[1000] bg-black/40" onClick={onClose}>
       <div
-        className="absolute right-0 top-0 h-full w-[420px] max-w-[90vw] bg-white border-l border-neutral-200 overflow-y-auto animate-slide-in"
+        className="absolute right-0 top-0 h-full w-full sm:w-[420px] sm:max-w-[90vw] bg-white border-l border-neutral-200 overflow-y-auto animate-slide-in"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
@@ -145,7 +145,20 @@ function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, ev
 
           {/* Actions */}
           <div className="space-y-2">
-            {paper.paperId && paper.paperId.length > 10 && (
+            {/* Paper link: prefer DOI (works cross-source), fall back to S2 for semantic_scholar papers */}
+            {paper.doi ? (
+              <a
+                href={`https://doi.org/${paper.doi}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full"
+              >
+                <Button variant="outline" size="sm" className="w-full font-mono text-[10px] uppercase tracking-widest justify-between">
+                  View Paper
+                  <ArrowUpRight className="h-3 w-3" />
+                </Button>
+              </a>
+            ) : paper.paperId && !String(paper.paperId).startsWith('W') && !String(paper.paperId).startsWith('cr_') && !String(paper.paperId).startsWith('onchain') && paper.paperId.length > 10 ? (
               <a
                 href={`https://www.semanticscholar.org/paper/${paper.paperId}`}
                 target="_blank"
@@ -157,7 +170,7 @@ function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, ev
                   <ArrowUpRight className="h-3 w-3" />
                 </Button>
               </a>
-            )}
+            ) : null}
 
             {paper.githubRepo && onMakeRunnable && (
               <Button
@@ -189,6 +202,18 @@ function PaperDetail({ paper, onClose, onImport, onMakeRunnable, onReplicate, ev
                 onClick={() => onImport(paper)}
               >
                 Import to Blockchain
+              </Button>
+            )}
+
+            {onRemove && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full font-mono text-[10px] uppercase tracking-widest text-red-500 border-red-200 hover:bg-red-50 hover:text-red-600"
+                onClick={() => onRemove(paper)}
+              >
+                <Trash2 className="h-3 w-3" />
+                Remove from Graph
               </Button>
             )}
           </div>

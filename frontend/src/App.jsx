@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ethers } from 'ethers';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, ChevronDown, ExternalLink, Plus } from 'lucide-react';
-import { CONTRACTS, NETWORKS, ABIS } from './config';
+import { Wallet, ChevronDown, ExternalLink, Plus, LogOut, User as UserIcon, Settings } from 'lucide-react';
+import { CONTRACTS, NETWORKS, ABIS, PRIVY_APP_ID } from './config';
 import { loadInitialGraph } from './utils/semanticScholar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import SubmitPaper from './components/SubmitPaper';
 import NetworkCheck from './components/NetworkCheck';
 import KnowledgeGraph from './components/KnowledgeGraph';
@@ -16,6 +17,12 @@ import AIResearchLab from './components/AIResearchLab';
 import Vision from './components/Vision';
 import KaggleLab from './components/KaggleLab';
 import ResearchFeed from './components/ResearchFeed';
+import TabErrorBoundary from './components/TabErrorBoundary';
+import ApiKeySettings from './components/ApiKeySettings';
+import { hasStoredApiKey } from './utils/llm';
+
+// Whether Privy is configured (PrivyProvider wraps App in index.jsx when true)
+const PRIVY_ENABLED = !!PRIVY_APP_ID;
 
 // Track-focused mode: ?track=defi | ?track=ai | ?track=consumer | (none = full)
 const TRACK_CONFIG = {
@@ -42,15 +49,57 @@ const TRACK_CONFIG = {
   },
 };
 
-function App() {
-  const [account, setAccount] = useState(null);
-  const [provider, setProvider] = useState(null);
+function AppCore({ privyState = null, privyWallets = [] }) {
+  // ─── Auth state ───────────────────────────────────────────────
+  // privyState and privyWallets are injected by AppWithPrivy wrapper
+  // when Privy is configured; otherwise they default to null/[].
+
+  // Fallback MetaMask-only state (used when Privy is not configured)
+  const [fallbackAccount, setFallbackAccount] = useState(null);
+  const [fallbackProvider, setFallbackProvider] = useState(null);
+
+  // Shared state
   const [signer, setSigner] = useState(null);
   const [contracts, setContracts] = useState({});
   const [loading, setLoading] = useState(false);
   const [importData, setImportData] = useState(null);
   const [agentPaper, setAgentPaper] = useState(null);
   const [labPaper, setLabPaper] = useState(null);
+  const [hideSubNav, setHideSubNav] = useState(false);
+  const [showApiSettings, setShowApiSettings] = useState(false);
+  const [keyConfigured, setKeyConfigured] = useState(() => hasStoredApiKey());
+
+  // Allow child components to open settings via custom event
+  useEffect(() => {
+    const handler = () => setShowApiSettings(true);
+    window.addEventListener('open-api-settings', handler);
+    return () => window.removeEventListener('open-api-settings', handler);
+  }, []);
+
+  const handleCloseApiSettings = useCallback(() => {
+    setShowApiSettings(false);
+    setKeyConfigured(hasStoredApiKey());
+  }, []);
+
+  // Derive unified auth values
+  const privyReady = privyState?.ready ?? true;
+  const privyAuthenticated = PRIVY_ENABLED && (privyState?.authenticated ?? false);
+  const privyUser = PRIVY_ENABLED ? (privyState?.user ?? null) : null;
+  const privyLogin = privyState?.login;
+  const privyLogout = privyState?.logout;
+
+  // Account: from Privy wallet or fallback
+  const account = PRIVY_ENABLED
+    ? (privyUser?.wallet?.address || null)
+    : fallbackAccount;
+
+  // User display name: prefer social profile name > email > wallet address
+  const userDisplayName = PRIVY_ENABLED && privyUser
+    ? (privyUser.google?.name || privyUser.github?.username || privyUser.email?.address || (account ? `${account.slice(0, 6)}...${account.slice(-4)}` : null))
+    : (account ? `${account.slice(0, 6)}...${account.slice(-4)}` : null);
+
+  // Provider for NetworkCheck
+  const provider = PRIVY_ENABLED ? null : fallbackProvider;
 
   // Graph data — lifted here so it persists across tab switches
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
@@ -69,6 +118,31 @@ function App() {
 
   const [activeTab, setActiveTab] = useState(trackConfig?.defaultTab || 'graph');
 
+  // Hide sub-nav on scroll when in Network tab
+  useEffect(() => {
+    let lastScrollY = window.pageYOffset;
+
+    const handleScroll = () => {
+      const currentScrollY = window.pageYOffset;
+
+      if (activeTab === 'graph') {
+        // Hide when scrolling down, show when scrolling up
+        if (currentScrollY > lastScrollY && currentScrollY > 20) {
+          setHideSubNav(true);
+        } else if (currentScrollY < lastScrollY) {
+          setHideSubNav(false);
+        }
+      } else {
+        setHideSubNav(false);
+      }
+
+      lastScrollY = currentScrollY;
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [activeTab]);
+
   const handleImportPaper = useCallback((paperData) => {
     setImportData(paperData);
     setActiveTab('submit');
@@ -84,35 +158,59 @@ function App() {
     setActiveTab('lab');
   }, []);
 
-  useEffect(() => {
-    if (window.ethereum) {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      setProvider(provider);
-    }
+  // ─── Contract initialization (shared for both Privy and fallback) ──
+  const initContracts = useCallback(async (signer) => {
+    const researchGraph = new ethers.Contract(CONTRACTS.RESEARCH_GRAPH, ABIS.RESEARCH_GRAPH, signer);
+    const usdc = new ethers.Contract(CONTRACTS.USDC, ABIS.ERC20, signer);
+    const researchToken = new ethers.Contract(CONTRACTS.RESEARCH_TOKEN, ABIS.ERC20, signer);
+    const predictionMarket = new ethers.Contract(CONTRACTS.PREDICTION_MARKET, ABIS.PREDICTION_MARKET, signer);
+    setContracts({ researchGraph, usdc, researchToken, predictionMarket });
   }, []);
 
-  const connectWallet = async () => {
+  // ─── Privy: set up contracts when wallet becomes available ─────
+  useEffect(() => {
+    if (!PRIVY_ENABLED || !privyAuthenticated || privyWallets.length === 0) return;
+    let cancelled = false;
+
+    async function setup() {
+      try {
+        const wallet = privyWallets[0];
+        const ethersProvider = await wallet.getEthersProvider();
+        const walletSigner = await ethersProvider.getSigner();
+        if (cancelled) return;
+        setSigner(walletSigner);
+        await initContracts(walletSigner);
+      } catch (err) {
+        console.error('Error setting up Privy wallet:', err);
+      }
+    }
+    setup();
+    return () => { cancelled = true; };
+  }, [PRIVY_ENABLED, privyAuthenticated, privyWallets, initContracts]);
+
+  // ─── Fallback: MetaMask-only mode ─────────────────────────────
+  useEffect(() => {
+    if (PRIVY_ENABLED) return;
+    if (window.ethereum) {
+      const p = new ethers.BrowserProvider(window.ethereum);
+      setFallbackProvider(p);
+    }
+  }, [PRIVY_ENABLED]);
+
+  const connectWalletFallback = async () => {
     if (!window.ethereum) {
       alert('Please install MetaMask!');
       return;
     }
-
     try {
       setLoading(true);
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      await provider.send('eth_requestAccounts', []);
-      const signer = await provider.getSigner();
-      const address = await signer.getAddress();
-
-      setAccount(address);
-      setSigner(signer);
-
-      const researchGraph = new ethers.Contract(CONTRACTS.RESEARCH_GRAPH, ABIS.RESEARCH_GRAPH, signer);
-      const usdc = new ethers.Contract(CONTRACTS.USDC, ABIS.ERC20, signer);
-      const researchToken = new ethers.Contract(CONTRACTS.RESEARCH_TOKEN, ABIS.ERC20, signer);
-      const predictionMarket = new ethers.Contract(CONTRACTS.PREDICTION_MARKET, ABIS.PREDICTION_MARKET, signer);
-
-      setContracts({ researchGraph, usdc, researchToken, predictionMarket });
+      const p = new ethers.BrowserProvider(window.ethereum);
+      await p.send('eth_requestAccounts', []);
+      const s = await p.getSigner();
+      const address = await s.getAddress();
+      setFallbackAccount(address);
+      setSigner(s);
+      await initContracts(s);
       setLoading(false);
     } catch (error) {
       console.error('Error connecting wallet:', error);
@@ -120,17 +218,52 @@ function App() {
     }
   };
 
+  // ─── Sign In handler (Privy or fallback) ──────────────────────
+  const handleSignIn = useCallback(() => {
+    if (PRIVY_ENABLED && privyLogin) {
+      privyLogin();
+    } else {
+      connectWalletFallback();
+    }
+  }, [PRIVY_ENABLED, privyLogin]);
+
+  // ─── Sign Out handler ─────────────────────────────────────────
+  const handleSignOut = useCallback(async () => {
+    if (PRIVY_ENABLED && privyLogout) {
+      await privyLogout();
+    }
+    setSigner(null);
+    setContracts({});
+    setFallbackAccount(null);
+  }, [PRIVY_ENABLED, privyLogout]);
+
+  // ─── Network switching ────────────────────────────────────────
   const switchNetwork = async (networkKey) => {
     const network = NETWORKS[networkKey];
+    // Use the first Privy wallet or fallback to window.ethereum
+    const walletProvider = PRIVY_ENABLED && privyWallets.length > 0
+      ? await privyWallets[0].getEthersProvider()
+      : (window.ethereum ? window.ethereum : null);
+
+    if (!walletProvider) return;
+
+    // For Privy embedded wallets, we use the provider's send method
+    // For MetaMask, we use window.ethereum.request
+    const requester = walletProvider.request
+      ? walletProvider
+      : (window.ethereum || null);
+
+    if (!requester) return;
+
     try {
-      await window.ethereum.request({
+      await requester.request({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: network.chainId }],
       });
     } catch (switchError) {
       if (switchError.code === 4902) {
         try {
-          await window.ethereum.request({
+          await requester.request({
             method: 'wallet_addEthereumChain',
             params: [network],
           });
@@ -141,9 +274,20 @@ function App() {
     }
   };
 
+  // ─── Loading state while Privy initializes ────────────────────
+  if (PRIVY_ENABLED && !privyReady) {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="font-mono text-xs uppercase tracking-widest text-neutral-400 animate-pulse">
+          Initializing...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-neutral-900 font-sans">
-      <NetworkCheck provider={provider} />
+      {!PRIVY_ENABLED && <NetworkCheck provider={provider} />}
 
       {/* Navigation */}
       <nav className="fixed top-0 w-full z-50 px-6 md:px-12 py-4 flex justify-between items-center bg-white/90 backdrop-blur-sm border-b border-neutral-100">
@@ -172,6 +316,17 @@ function App() {
               All Tracks
             </a>
           )}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 border-neutral-200 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-900 transition-colors relative"
+            onClick={() => setShowApiSettings(true)}
+            title="AI Settings"
+            aria-label="AI Settings"
+          >
+            <Settings className="h-4 w-4" />
+            <span className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full border border-white ${keyConfigured ? 'bg-green-500' : 'bg-amber-400'}`} />
+          </Button>
           {account && (
             <Button
               variant="outline"
@@ -179,6 +334,7 @@ function App() {
               className="h-8 w-8 border-neutral-300 text-neutral-600 hover:bg-neutral-900 hover:text-white hover:border-neutral-900 transition-colors"
               onClick={() => setActiveTab('submit')}
               title="Submit Paper"
+              aria-label="Submit Paper"
             >
               <Plus className="h-4 w-4" />
             </Button>
@@ -187,16 +343,25 @@ function App() {
             <Button
               variant="outline"
               className="border-neutral-900 text-neutral-900 hover:bg-neutral-900 hover:text-white font-mono text-xs uppercase tracking-widest"
-              onClick={connectWallet}
+              onClick={handleSignIn}
               disabled={loading}
             >
-              <Wallet className="h-4 w-4" />
-              {loading ? 'Connecting...' : 'Connect'}
+              {PRIVY_ENABLED ? (
+                <>
+                  <UserIcon className="h-4 w-4" />
+                  Sign In
+                </>
+              ) : (
+                <>
+                  <Wallet className="h-4 w-4" />
+                  {loading ? 'Connecting...' : 'Connect'}
+                </>
+              )}
             </Button>
           ) : (
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="font-mono text-[10px]">
-                {account.slice(0, 6)}...{account.slice(-4)}
+                {userDisplayName}
               </Badge>
               <div className="flex gap-1">
                 <Button
@@ -215,14 +380,27 @@ function App() {
                 >
                   Plasma
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-neutral-400 hover:text-red-600"
+                  onClick={handleSignOut}
+                  aria-label="Sign Out"
+                  title="Sign Out"
+                >
+                  <LogOut className="h-4 w-4" />
+                </Button>
               </div>
             </div>
           )}
         </div>
       </nav>
 
+      {/* API Key Settings Panel */}
+      <ApiKeySettings isOpen={showApiSettings} onClose={handleCloseApiSettings} />
+
       {/* Main Content */}
-      <main className="pt-[72px] min-h-screen">
+      <main className="pt-[64px] min-h-screen">
         {!account ? (
           /* Landing / Connect */
           <div className="max-w-7xl mx-auto px-6 md:px-12">
@@ -267,12 +445,26 @@ function App() {
                 </p>
                 <Button
                   className="bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest px-8 h-12"
-                  onClick={connectWallet}
+                  onClick={handleSignIn}
                   disabled={loading}
                 >
-                  <Wallet className="h-4 w-4" />
-                  Enter The Republic
+                  {PRIVY_ENABLED ? (
+                    <>
+                      <UserIcon className="h-4 w-4" />
+                      Enter The Republic
+                    </>
+                  ) : (
+                    <>
+                      <Wallet className="h-4 w-4" />
+                      Enter The Republic
+                    </>
+                  )}
                 </Button>
+                {PRIVY_ENABLED && (
+                  <p className="text-[11px] text-neutral-400 mt-3 font-mono">
+                    Sign in with Google, GitHub, email, or connect wallet
+                  </p>
+                )}
               </motion.div>
             </section>
 
@@ -280,9 +472,9 @@ function App() {
               /* Full mode: show all 3 tracks */
               <section className="py-24 grid grid-cols-1 md:grid-cols-3 gap-8">
                 {[
-                  { label: 'Knowledge Exchange', icon: '📈', desc: 'Main Track: DeFi. LMSR-based prediction markets to price research truth and fund replication attempts trustlessly.', track: 'defi' },
-                  { label: 'Agent Swarm', icon: '🤖', desc: 'Main Track: AI Application. Specialized agent castes reason over the graph with robust TRiSM guardrails and cross-chain verification.', track: 'ai' },
-                  { label: 'Science Primitive', icon: '🧬', desc: 'Main Track: New Primitives. A research creator economy where papers are launched, verified, and cited as liquid assets.', track: 'consumer' },
+                  { label: 'Knowledge Exchange', icon: '\u{1F4C8}', desc: 'Main Track: DeFi. LMSR-based prediction markets to price research truth and fund replication attempts trustlessly.', track: 'defi' },
+                  { label: 'Agent Swarm', icon: '\u{1F916}', desc: 'Main Track: AI Application. Specialized agent castes reason over the graph with robust TRiSM guardrails and cross-chain verification.', track: 'ai' },
+                  { label: 'Science Primitive', icon: '\u{1F9EC}', desc: 'Main Track: New Primitives. A research creator economy where papers are launched, verified, and cited as liquid assets.', track: 'consumer' },
                 ].map((item, i) => (
                   <motion.div
                     key={i}
@@ -334,7 +526,7 @@ function App() {
                     </motion.div>
                   ))}
                   {trackMode === 'consumer' && [
-                    { label: 'Live Feed', stat: '∞', desc: 'Real-time stream of paper launches, agent reviews, market moves, and alerts.' },
+                    { label: 'Live Feed', stat: '\u221E', desc: 'Real-time stream of paper launches, agent reviews, market moves, and alerts.' },
                     { label: 'Knowledge Graph', stat: '50+', desc: 'Interactive ForceGraph2D. Explore citations, fields, and AI-predicted connections.' },
                     { label: 'Paper2Agent', stat: 'MCP', desc: 'Turn any paper into runnable AI tools via Model Context Protocol servers.' },
                   ].map((item, i) => (
@@ -352,7 +544,7 @@ function App() {
         ) : (
           /* Authenticated View */
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <div className="border-b border-neutral-200 bg-white sticky top-[72px] z-40">
+            <div className={`border-b border-neutral-200 bg-white sticky top-[64px] z-40 transition-transform duration-300 ${hideSubNav && activeTab === 'graph' ? '-translate-y-full' : 'translate-y-0'}`}>
               <div className="max-w-7xl mx-auto px-6 md:px-12 flex items-center overflow-x-auto no-scrollbar">
                 {trackConfig && (
                   <div className="flex items-center gap-2 mr-4 py-2 flex-shrink-0">
@@ -391,36 +583,52 @@ function App() {
 
             <div className={activeTab === 'graph' ? '' : 'max-w-7xl mx-auto px-6 md:px-12 py-8'}>
               <TabsContent value="vision">
-                <Vision />
+                <TabErrorBoundary name="Vision">
+                  <Vision />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="graph">
-                <KnowledgeGraph
-                  contracts={contracts}
-                  account={account}
-                  graphData={graphData}
-                  setGraphData={setGraphData}
-                  onImportPaper={handleImportPaper}
-                  onMakeRunnable={handleMakeRunnable}
-                  onReplicate={handleReplicate}
-                />
+                <TabErrorBoundary name="Knowledge Graph">
+                  <KnowledgeGraph
+                    contracts={contracts}
+                    account={account}
+                    graphData={graphData}
+                    setGraphData={setGraphData}
+                    onImportPaper={handleImportPaper}
+                    onMakeRunnable={handleMakeRunnable}
+                    onReplicate={handleReplicate}
+                  />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="submit">
-                <SubmitPaper contracts={contracts} account={account} importData={importData} />
+                <TabErrorBoundary name="Submit Paper">
+                  <SubmitPaper contracts={contracts} account={account} importData={importData} />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="predict">
-                <PredictionMarket contracts={contracts} account={account} />
+                <TabErrorBoundary name="Prediction Market">
+                  <PredictionMarket contracts={contracts} account={account} />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="agent">
-                <Paper2Agent agentPaper={agentPaper} />
+                <TabErrorBoundary name="Paper2Agent">
+                  <Paper2Agent agentPaper={agentPaper} />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="lab">
-                <AIResearchLab labPaper={labPaper} />
+                <TabErrorBoundary name="AI Research Lab">
+                  <AIResearchLab labPaper={labPaper} />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="kaggle">
-                <KaggleLab />
+                <TabErrorBoundary name="Kaggle Lab">
+                  <KaggleLab />
+                </TabErrorBoundary>
               </TabsContent>
               <TabsContent value="feed">
-                <ResearchFeed />
+                <TabErrorBoundary name="Research Feed">
+                  <ResearchFeed />
+                </TabErrorBoundary>
               </TabsContent>
             </div>
           </Tabs>
@@ -464,4 +672,16 @@ function App() {
   );
 }
 
-export default App;
+// Wrapper that calls Privy hooks (only rendered inside PrivyProvider)
+function AppWithPrivy() {
+  const privyState = usePrivy();
+  const { wallets } = useWallets();
+  return <AppCore privyState={privyState} privyWallets={wallets} />;
+}
+
+// Wrapper without Privy hooks (rendered when no PrivyProvider)
+function AppWithoutPrivy() {
+  return <AppCore />;
+}
+
+export default PRIVY_ENABLED ? AppWithPrivy : AppWithoutPrivy;

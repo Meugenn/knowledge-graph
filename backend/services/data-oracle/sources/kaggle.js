@@ -1,12 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 
+/** @mock — No real Kaggle API integration. Returns data from fixtures when available. */
 class KaggleSource {
   constructor(opts = {}) {
     this.mockPath = path.join(__dirname, '../../../fixtures/kaggle-sample.json');
     this.mockData = null;
     if (fs.existsSync(this.mockPath)) {
       this.mockData = JSON.parse(fs.readFileSync(this.mockPath, 'utf8'));
+    } else {
+      console.info('[KaggleSource] Mock-only source — no fixtures found, will return empty results');
     }
   }
 

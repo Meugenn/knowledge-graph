@@ -410,7 +410,266 @@ export async function runGNNPipeline(graphData, callbacks = {}) {
 
   const predictions = predictLinks(embeddings, idToIdx, nodes, existingEdgeSet, 20);
 
-  if (onPhaseComplete) onPhaseComplete(3, { predictions });
+  // Phase 4: Analyse — clusters, key papers, gaps
+  if (onPhaseStart) onPhaseStart(4, 'Analysing Graph');
+  await new Promise(r => setTimeout(r, 50));
 
-  return predictions;
+  const clusters = detectClusters(embeddings, nodes, Math.min(6, Math.max(2, Math.floor(nodes.length / 15))));
+  const keyPapers = findKeyPapers(embeddings, nodes, links, idToIdx, clusters);
+  const gaps = findResearchGaps(embeddings, clusters, nodes);
+
+  if (onPhaseComplete) onPhaseComplete(3, { predictions });
+  if (onPhaseComplete) onPhaseComplete(4, { clusters, keyPapers, gaps });
+
+  return { predictions, clusters, keyPapers, gaps };
+}
+
+// ============================================================
+// Cluster Detection — K-means on GCN embeddings
+// ============================================================
+
+function embeddingRow(H, i) {
+  const row = new Float64Array(H.cols);
+  for (let k = 0; k < H.cols; k++) row[k] = H.data[i * H.cols + k];
+  return row;
+}
+
+function l2Dist(a, b) {
+  let sum = 0;
+  for (let k = 0; k < a.length; k++) sum += (a[k] - b[k]) ** 2;
+  return Math.sqrt(sum);
+}
+
+export function detectClusters(H, nodes, k = 5) {
+  const n = H.rows;
+  const dim = H.cols;
+  if (n < k) k = Math.max(2, n);
+
+  // K-means++ init
+  const centroids = [];
+  const usedIdx = new Set();
+  const firstIdx = Math.floor(Math.random() * n);
+  centroids.push(embeddingRow(H, firstIdx));
+  usedIdx.add(firstIdx);
+
+  for (let c = 1; c < k; c++) {
+    const dists = new Float64Array(n);
+    let totalDist = 0;
+    for (let i = 0; i < n; i++) {
+      if (usedIdx.has(i)) { dists[i] = 0; continue; }
+      const row = embeddingRow(H, i);
+      let minD = Infinity;
+      for (const cent of centroids) minD = Math.min(minD, l2Dist(row, cent));
+      dists[i] = minD * minD;
+      totalDist += dists[i];
+    }
+    // Weighted random pick
+    let r = Math.random() * totalDist;
+    for (let i = 0; i < n; i++) {
+      r -= dists[i];
+      if (r <= 0) { centroids.push(embeddingRow(H, i)); usedIdx.add(i); break; }
+    }
+    if (centroids.length <= c) centroids.push(embeddingRow(H, Math.floor(Math.random() * n)));
+  }
+
+  // K-means iterations
+  const assignments = new Int32Array(n);
+  for (let iter = 0; iter < 20; iter++) {
+    // Assign
+    for (let i = 0; i < n; i++) {
+      const row = embeddingRow(H, i);
+      let bestC = 0, bestD = Infinity;
+      for (let c = 0; c < k; c++) {
+        const d = l2Dist(row, centroids[c]);
+        if (d < bestD) { bestD = d; bestC = c; }
+      }
+      assignments[i] = bestC;
+    }
+    // Update centroids
+    const sums = Array.from({ length: k }, () => new Float64Array(dim));
+    const counts = new Int32Array(k);
+    for (let i = 0; i < n; i++) {
+      const c = assignments[i];
+      counts[c]++;
+      const row = embeddingRow(H, i);
+      for (let d = 0; d < dim; d++) sums[c][d] += row[d];
+    }
+    for (let c = 0; c < k; c++) {
+      if (counts[c] === 0) continue;
+      for (let d = 0; d < dim; d++) centroids[c][d] = sums[c][d] / counts[c];
+    }
+  }
+
+  // Build cluster objects
+  const clusterMap = Array.from({ length: k }, () => []);
+  for (let i = 0; i < n; i++) clusterMap[assignments[i]].push(i);
+
+  return clusterMap
+    .map((memberIndices, cIdx) => {
+      if (memberIndices.length === 0) return null;
+      const members = memberIndices.map(i => nodes[i]);
+      // Label by most common field
+      const fieldCounts = {};
+      members.forEach(p => {
+        const f = p.fieldsOfStudy?.[0] || 'Unknown';
+        fieldCounts[f] = (fieldCounts[f] || 0) + 1;
+      });
+      const label = Object.entries(fieldCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Mixed';
+      // Top papers by citations
+      const topPapers = [...members].sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0)).slice(0, 5);
+      const avgCitations = members.reduce((s, p) => s + (p.citationCount || 0), 0) / members.length;
+      return {
+        id: cIdx,
+        label,
+        size: members.length,
+        avgCitations: Math.round(avgCitations),
+        topPapers,
+        memberIds: members.map(p => p.id),
+        centroid: centroids[cIdx],
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.size - a.size);
+}
+
+// ============================================================
+// Key Papers — influence, bridge, hub scoring
+// ============================================================
+
+export function findKeyPapers(H, nodes, links, idToIdx, clusters) {
+  const n = H.rows;
+
+  // Assign each node to its cluster
+  const nodeCluster = new Map();
+  clusters.forEach(cl => cl.memberIds.forEach(id => nodeCluster.set(id, cl.id)));
+
+  // Compute degree
+  const degree = new Int32Array(n);
+  links.forEach(link => {
+    const src = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgt = typeof link.target === 'object' ? link.target.id : link.target;
+    if (link.predicted) return;
+    const si = idToIdx.get(src);
+    const ti = idToIdx.get(tgt);
+    if (si !== undefined) degree[si]++;
+    if (ti !== undefined) degree[ti]++;
+  });
+
+  // Count cross-cluster edges per node (bridge score)
+  const bridgeCount = new Int32Array(n);
+  links.forEach(link => {
+    const src = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgt = typeof link.target === 'object' ? link.target.id : link.target;
+    if (link.predicted) return;
+    const cSrc = nodeCluster.get(src);
+    const cTgt = nodeCluster.get(tgt);
+    if (cSrc !== undefined && cTgt !== undefined && cSrc !== cTgt) {
+      const si = idToIdx.get(src);
+      const ti = idToIdx.get(tgt);
+      if (si !== undefined) bridgeCount[si]++;
+      if (ti !== undefined) bridgeCount[ti]++;
+    }
+  });
+
+  // Embedding magnitude (proxy for overall "distinctiveness")
+  const magnitude = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (let k = 0; k < H.cols; k++) sum += H.data[i * H.cols + k] ** 2;
+    magnitude[i] = Math.sqrt(sum);
+  }
+
+  const maxDeg = Math.max(...degree) || 1;
+  const maxBridge = Math.max(...bridgeCount) || 1;
+  const maxMag = Math.max(...magnitude) || 1;
+
+  const scored = nodes.map((node, i) => {
+    const citScore = Math.log10((node.citationCount || 0) + 1) / 6;
+    const degScore = degree[i] / maxDeg;
+    const briScore = bridgeCount[i] / maxBridge;
+    const magScore = magnitude[i] / maxMag;
+
+    // Weighted composite
+    const influence = citScore * 0.3 + degScore * 0.25 + briScore * 0.25 + magScore * 0.2;
+
+    let role = 'cited';
+    if (bridgeCount[i] > 0 && bridgeCount[i] >= degree[i] * 0.3) role = 'bridge';
+    else if (degree[i] > maxDeg * 0.5) role = 'hub';
+
+    return {
+      id: node.id,
+      title: node.title,
+      citationCount: node.citationCount || 0,
+      influence: Math.round(influence * 100) / 100,
+      role,
+      degree: degree[i],
+      bridgeCount: bridgeCount[i],
+      cluster: nodeCluster.get(node.id),
+    };
+  });
+
+  scored.sort((a, b) => b.influence - a.influence);
+  return scored.slice(0, 15);
+}
+
+// ============================================================
+// Research Gaps — inter-cluster distance analysis
+// ============================================================
+
+export function findResearchGaps(H, clusters, nodes) {
+  if (clusters.length < 2) return [];
+
+  const gaps = [];
+  for (let i = 0; i < clusters.length; i++) {
+    for (let j = i + 1; j < clusters.length; j++) {
+      const cA = clusters[i];
+      const cB = clusters[j];
+
+      // Average embedding distance between clusters (sample for speed)
+      const sampleA = cA.memberIds.slice(0, 20);
+      const sampleB = cB.memberIds.slice(0, 20);
+
+      if (sampleA.length === 0 || sampleB.length === 0) continue;
+
+      const centDist = l2Dist(cA.centroid, cB.centroid);
+
+      // Find closest pair across clusters (potential bridge topics)
+      let minDist = Infinity;
+      let bridgePairA = null, bridgePairB = null;
+
+      // Simple: compare centroids to each node in the other cluster
+      // This gives us the papers closest to the "gap"
+      const nodeMap = new Map();
+      nodes.forEach((n, idx) => nodeMap.set(n.id, idx));
+
+      for (const idA of sampleA) {
+        const idxA = nodeMap.get(idA);
+        if (idxA === undefined) continue;
+        const rowA = embeddingRow(H, idxA);
+        for (const idB of sampleB) {
+          const idxB = nodeMap.get(idB);
+          if (idxB === undefined) continue;
+          const rowB = embeddingRow(H, idxB);
+          const d = l2Dist(rowA, rowB);
+          if (d < minDist) {
+            minDist = d;
+            bridgePairA = nodes[idxA];
+            bridgePairB = nodes[idxB];
+          }
+        }
+      }
+
+      gaps.push({
+        clusterA: { id: cA.id, label: cA.label, size: cA.size },
+        clusterB: { id: cB.id, label: cB.label, size: cB.size },
+        distance: Math.round(centDist * 100) / 100,
+        bridgePaperA: bridgePairA ? { id: bridgePairA.id, title: bridgePairA.title } : null,
+        bridgePaperB: bridgePairB ? { id: bridgePairB.id, title: bridgePairB.title } : null,
+      });
+    }
+  }
+
+  // Sort by distance descending (biggest gaps first = most underexplored)
+  gaps.sort((a, b) => b.distance - a.distance);
+  return gaps.slice(0, 10);
 }

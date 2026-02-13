@@ -1,5 +1,8 @@
 node_modules/
 .env
+.env.local
+.env.*.local
+.env.production
 artifacts/
 cache/
 coverage/
@@ -11,22 +14,43 @@ build/
 # Frontend
 frontend/node_modules/
 frontend/build/
+frontend/dist/
+frontend/.env
 frontend/.env.local
+frontend/.env.*.local
+frontend/.env.production
 
 # Backend
 backend/node_modules/
+backend/.env
 backend/data/
 backend/submissions/
 backend/package-lock.json
 .npm-cache/
 
+# Deployment artifacts
+deployment.json
+hardhat.log
+
 # OS
 .DS_Store
+Thumbs.db
+desktop.ini
 *.swp
 *.swo
 
 # IDE
 .vscode/
 .idea/
+
+# Vercel
 .vercel
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+
+# Temp files
+tmpclaude-*
+*.tmp

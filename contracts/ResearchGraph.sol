@@ -64,6 +64,10 @@ contract ResearchGraph is Ownable, ReentrancyGuard {
     mapping(address => Reviewer) public reviewers;
     mapping(uint256 => address[]) public paperReviewers; // paperId => reviewer addresses
     mapping(uint256 => uint256[]) public citations; // paperId => cited paper IDs
+    mapping(uint256 => uint256[]) public paperReviewIds; // paperId => review IDs for efficient lookup
+
+    // Reviewer registry — iterable list of all registered reviewer addresses
+    address[] public reviewerList;
 
     // Economics
     uint256 public submissionFeeUSD = 50 * 10**6;  // $50 in USDC (6 decimals)
@@ -218,6 +222,9 @@ contract ResearchGraph is Ownable, ReentrancyGuard {
             rewarded: false
         });
 
+        // Track review ID for efficient per-paper lookup
+        paperReviewIds[paperId].push(reviewCount);
+
         reviewers[msg.sender].reviewCount++;
         reviewers[msg.sender].reputation += score; // Simple reputation
 
@@ -240,14 +247,12 @@ contract ResearchGraph is Ownable, ReentrancyGuard {
      * @dev Check if all reviews are complete and update paper status
      */
     function _checkReviewCompletion(uint256 paperId) internal {
-        uint256 completedReviews = 0;
+        uint256[] storage reviewIds = paperReviewIds[paperId];
+        uint256 completedReviews = reviewIds.length;
         uint256 totalScore = 0;
 
-        for (uint256 i = 1; i <= reviewCount; i++) {
-            if (reviews[i].paperId == paperId) {
-                completedReviews++;
-                totalScore += reviews[i].score;
-            }
+        for (uint256 i = 0; i < reviewIds.length; i++) {
+            totalScore += reviews[reviewIds[i]].score;
         }
 
         if (completedReviews >= minReviewersRequired) {
@@ -292,6 +297,11 @@ contract ResearchGraph is Ownable, ReentrancyGuard {
             researchToken.transferFrom(msg.sender, address(this), stakeAmount),
             "Stake transfer failed"
         );
+
+        // Track new reviewer in the iterable list if not already registered
+        if (reviewers[msg.sender].stakedTokens == 0) {
+            reviewerList.push(msg.sender);
+        }
 
         reviewers[msg.sender] = Reviewer({
             reputation: 0,
@@ -341,12 +351,24 @@ contract ResearchGraph is Ownable, ReentrancyGuard {
     }
 
     function _getActiveReviewers() internal view returns (address[] memory) {
-        // Simplified: return mock reviewers for demo
-        // In production, iterate through all reviewers
-        address[] memory active = new address[](5);
+        // Count active reviewers first
         uint256 count = 0;
+        for (uint256 i = 0; i < reviewerList.length; i++) {
+            if (reviewers[reviewerList[i]].isActive) {
+                count++;
+            }
+        }
 
-        // This would iterate through a reviewer registry in production
+        // Build array of active reviewers
+        address[] memory active = new address[](count);
+        uint256 idx = 0;
+        for (uint256 i = 0; i < reviewerList.length; i++) {
+            if (reviewers[reviewerList[i]].isActive) {
+                active[idx] = reviewerList[i];
+                idx++;
+            }
+        }
+
         return active;
     }
 

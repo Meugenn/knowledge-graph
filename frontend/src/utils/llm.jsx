@@ -1,144 +1,106 @@
-// Shared LLM calling utilities — extracted from ResearchAgent.js
-// Used by both ResearchAgent (RAG chat) and AI Research Lab (agent pipeline)
+// Shared LLM calling utilities — routes all calls through backend proxy
+// API keys: server .env as fallback, user key from sessionStorage takes priority
 
-const API_KEY_STORAGE = 'rg_llm_api_key';
-const API_URL_STORAGE = 'rg_llm_api_url';
+
+
 const PROVIDER_STORAGE = 'rg_llm_provider';
 const MODEL_STORAGE = 'rg_llm_model';
+const APIKEY_STORAGE = 'rg_llm_apikey';
 
 export const PROVIDERS = {
   claude: {
     label: 'Claude (Anthropic)',
-    url: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-sonnet-4-5-20250929',
-    placeholder: 'sk-ant-...',
+    contextWindow: 200000,
+    maxOutput: 8192,
+    costPer1kInput: 0.003,
+    costPer1kOutput: 0.015,
   },
   openai: {
     label: 'OpenAI',
-    url: 'https://api.openai.com/v1/chat/completions',
     defaultModel: 'gpt-4o-mini',
-    placeholder: 'sk-...',
+    contextWindow: 128000,
+    maxOutput: 16384,
+    costPer1kInput: 0.00015,
+    costPer1kOutput: 0.0006,
   },
   openrouter: {
     label: 'OpenRouter',
-    url: 'https://openrouter.ai/api/v1/chat/completions',
     defaultModel: 'anthropic/claude-sonnet-4-5',
-    placeholder: 'sk-or-...',
+    contextWindow: 200000,
+    maxOutput: 8192,
+    costPer1kInput: 0.003,
+    costPer1kOutput: 0.015,
   },
-  custom: {
-    label: 'Custom (OpenAI-compatible)',
-    url: '',
-    defaultModel: '',
-    placeholder: 'API key...',
+  gemini: {
+    label: 'Google Gemini',
+    defaultModel: 'gemini-2.5-flash',
+    contextWindow: 1000000,
+    maxOutput: 8192,
+    costPer1kInput: 0.00015,
+    costPer1kOutput: 0.0006,
   },
 };
 
-export function detectProvider(key) {
-  if (!key) return 'claude';
-  if (key.startsWith('sk-ant-')) return 'claude';
-  if (key.startsWith('sk-or-')) return 'openrouter';
-  if (key.startsWith('sk-')) return 'openai';
-  return 'claude';
-}
-
 export function getLLMConfig() {
-  const apiKey = localStorage.getItem(API_KEY_STORAGE) || '';
   const provider = localStorage.getItem(PROVIDER_STORAGE) || 'claude';
-  const apiUrl = localStorage.getItem(API_URL_STORAGE) || '';
   const model = localStorage.getItem(MODEL_STORAGE) || '';
-  return { apiKey, provider, apiUrl, model };
+  return { provider, model };
 }
 
-export async function callClaude(apiKey, model, systemPrompt, chatMessages, apiUrl, options = {}) {
-  const url = apiUrl || PROVIDERS.claude.url;
-  const maxTokens = options.maxTokens || 1500;
-
-  const messages = chatMessages
-    .filter(m => m.role !== 'system')
-    .map(m => ({ role: m.role, content: m.content }));
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: model || PROVIDERS.claude.defaultModel,
-      system: systemPrompt,
-      messages,
-      max_tokens: maxTokens,
-      temperature: options.temperature ?? 0.7,
-    }),
-  });
-
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`Claude API error ${response.status}: ${errBody.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  const textBlock = data.content?.find(b => b.type === 'text');
-  if (!textBlock?.text) {
-    throw new Error('Claude returned empty response. Try rephrasing your question.');
-  }
-  return textBlock.text;
+export function setLLMConfig(provider, model) {
+  if (provider) localStorage.setItem(PROVIDER_STORAGE, provider);
+  if (model !== undefined) localStorage.setItem(MODEL_STORAGE, model);
 }
 
-export async function callOpenAI(apiKey, model, systemPrompt, chatMessages, apiUrl, options = {}) {
-  const url = apiUrl || PROVIDERS.openai.url;
-  const maxTokens = options.maxTokens || 1500;
+export function getStoredApiKey() {
+  return sessionStorage.getItem(APIKEY_STORAGE) || '';
+}
 
-  const messages = [
-    { role: 'system', content: systemPrompt },
-    ...chatMessages.filter(m => m.role !== 'system'),
-  ];
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`,
-  };
-
-  if (url.includes('openrouter')) {
-    headers['HTTP-Referer'] = window.location.origin;
+export function setStoredApiKey(key) {
+  if (key) {
+    sessionStorage.setItem(APIKEY_STORAGE, key);
+  } else {
+    sessionStorage.removeItem(APIKEY_STORAGE);
   }
+}
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: model || PROVIDERS.openai.defaultModel,
-      messages,
-      max_tokens: maxTokens,
-      temperature: options.temperature ?? 0.7,
-    }),
-  });
+export function hasStoredApiKey() {
+  return !!sessionStorage.getItem(APIKEY_STORAGE);
+}
 
-  if (!response.ok) {
-    const errBody = await response.text();
-    throw new Error(`API error ${response.status}: ${errBody.slice(0, 300)}`);
-  }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('API returned empty response. Try rephrasing your question.');
-  }
-  return content;
+// Dispatch event to open the global API Key Settings panel from anywhere
+export function openApiSettings() {
+  window.dispatchEvent(new Event('open-api-settings'));
 }
 
 export async function callLLM(systemPrompt, userMessages, options = {}) {
-  const { apiKey, provider, apiUrl, model } = getLLMConfig();
-  if (!apiKey) throw new Error('No API key configured. Please set up an LLM provider in the Research Navigator.');
-
+  const { provider, model } = getLLMConfig();
   const effectiveModel = model || PROVIDERS[provider]?.defaultModel || '';
-  const effectiveUrl = apiUrl || PROVIDERS[provider]?.url || '';
+  const userApiKey = getStoredApiKey();
 
-  if (provider === 'claude') {
-    return callClaude(apiKey, effectiveModel, systemPrompt, userMessages, effectiveUrl, options);
-  } else {
-    return callOpenAI(apiKey, effectiveModel, systemPrompt, userMessages, effectiveUrl, options);
+  const response = await fetch(`/api/llm/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider,
+      model: effectiveModel,
+      systemPrompt,
+      messages: userMessages,
+      maxTokens: options.maxTokens || 1500,
+      temperature: options.temperature ?? 0.7,
+      ...(userApiKey ? { userApiKey } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(errBody.error || `LLM proxy error ${response.status}`);
   }
+
+  const data = await response.json();
+  if (!data.content) {
+    throw new Error('LLM returned empty response. Try rephrasing your question.');
+  }
+  return data.content;
 }

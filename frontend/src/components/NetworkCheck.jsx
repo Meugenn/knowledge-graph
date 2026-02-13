@@ -9,15 +9,16 @@ function NetworkCheck({ provider }) {
 
   useEffect(() => {
     checkNetwork();
+    const handleChainChanged = (chainId) => {
+      setCurrentChainId(chainId);
+      checkNetwork();
+    };
     if (window.ethereum) {
-      window.ethereum.on('chainChanged', (chainId) => {
-        setCurrentChainId(chainId);
-        checkNetwork();
-      });
+      window.ethereum.on('chainChanged', handleChainChanged);
     }
     return () => {
       if (window.ethereum) {
-        window.ethereum.removeAllListeners('chainChanged');
+        window.ethereum.removeListener('chainChanged', handleChainChanged);
       }
     };
   }, [provider]);

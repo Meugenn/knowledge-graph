@@ -181,17 +181,20 @@ def build_knowledge_graph(competition, matched_papers, results, baseline_score, 
     for match in matched_papers:
         paper_node_id = f"paper:{match['paper_id']}"
         tech_node_id = f"tech:{match['paper_id']}"
+        is_ai = match.get('source') == 'ai'
 
         nodes.append({
             'id': paper_node_id,
             'type': 'paper',
             'label': f"{match['paper_title'][:40]}...",
             'paper_id': match['paper_id'],
+            **({"ai_suggested": True, "ai_paper_id": match.get('ai_paper_id', ''), "ai_paper_title": match.get('ai_paper_title', '')} if is_ai else {}),
         })
         nodes.append({
             'id': tech_node_id,
             'type': 'technique',
             'label': match['technique'],
+            **({"ai_suggested": True} if is_ai else {}),
         })
         edges.append({
             'source': paper_node_id,
@@ -286,6 +289,56 @@ def main():
     emit({"event": "paper_search_start", "message": "Searching 50 papers for relevant techniques..."})
 
     matched_papers = find_relevant_papers(context, max_papers=8)
+
+    # ─── Merge AI Suggestions ────────────────────
+    AI_STRATEGY_MAP = {
+        'gradient_boosting': 'kingma2015',
+        'random_forest': 'goodfellow2014',
+        'logistic_regression': 'srivastava2014',
+        'ensemble': 'kaplan2020',
+        'feature_selection': 'vaswani2017',
+        'pca': 'hinton2006',
+        'hyperparameter_search': 'zoph2017',
+    }
+
+    ai_suggestions_path = os.path.join(data_dir, 'ai_suggestions.json')
+    if os.path.exists(ai_suggestions_path):
+        try:
+            with open(ai_suggestions_path, 'r') as f:
+                ai_suggestions = json.load(f)
+
+            existing_ids = {m['paper_id'] for m in matched_papers}
+
+            for suggestion in ai_suggestions:
+                strategy = suggestion.get('sklearn_strategy', '')
+                mapped_id = AI_STRATEGY_MAP.get(strategy)
+                if not mapped_id or mapped_id in existing_ids:
+                    continue
+
+                ai_paper_id = f"ai_{suggestion.get('paper_id', strategy)}"
+                matched_papers.append({
+                    'paper_id': mapped_id,
+                    'paper_title': suggestion.get('paper_title', f'AI: {strategy}'),
+                    'technique': suggestion.get('technique', strategy),
+                    'reason': suggestion.get('reason', 'AI-suggested technique'),
+                    'source': 'ai',
+                    'ai_paper_id': ai_paper_id,
+                    'ai_paper_title': suggestion.get('paper_title', ''),
+                })
+                existing_ids.add(mapped_id)
+
+                emit({
+                    "event": "paper_matched",
+                    "paper_id": ai_paper_id,
+                    "paper_title": suggestion.get('paper_title', ''),
+                    "technique": suggestion.get('technique', strategy),
+                    "reason": suggestion.get('reason', ''),
+                    "source": "ai",
+                })
+
+            emit({"event": "log", "message": f"Merged {len(ai_suggestions)} AI suggestions ({len(matched_papers)} total papers)"})
+        except Exception as e:
+            emit({"event": "log", "message": f"Could not load AI suggestions: {str(e)[:100]}"})
 
     for match in matched_papers:
         emit({

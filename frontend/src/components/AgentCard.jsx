@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { openApiSettings } from '../utils/llm';
 
 function AgentCard({ agent, status, output, duration, error }) {
   const [expanded, setExpanded] = useState(false);
@@ -73,22 +74,23 @@ function AgentCard({ agent, status, output, duration, error }) {
       {expanded && status === 'error' && (
         <div className="border-t border-neutral-200 bg-red-50 px-4 py-3">
           <p className="text-sm text-red-700">{error || 'An unknown error occurred.'}</p>
+          {error && /api key|unauthorized|401|403/i.test(error) && (
+            <button
+              onClick={openApiSettings}
+              className="mt-2 text-[10px] font-mono uppercase tracking-widest text-red-500 hover:text-red-800 underline underline-offset-2"
+            >
+              Configure API Key
+            </button>
+          )}
         </div>
       )}
 
       {expanded && status === 'complete' && output && (
         <div className="border-t border-neutral-200 px-4 py-3">
-          {agent.id === 'iris' && <IrisOutput data={output} />}
-          {agent.id === 'atlas' && <AtlasOutput data={output} />}
-          {agent.id === 'tensor' && <TensorOutput data={output} />}
-          {agent.id === 'sage' && <SageOutput data={output} />}
-          {(agent.id === 'scribe' || agent.id === 'frontier-scribe') && <ScribeOutput data={output} />}
-          {agent.id === 'nova' && <NovaOutput data={output} />}
-          {agent.id === 'eureka' && <EurekaOutput data={output} />}
-          {agent.id === 'flux' && <FluxOutput data={output} />}
-          {agent.id === 'nexus' && <NexusOutput data={output} />}
-          {(agent.id === 'formal' || agent.id === 'frontier-formal') && <FormalOutput data={output} />}
-          {output._parseError && <RawOutput data={output._raw} />}
+          {output._parseError
+            ? <RawOutput data={output._raw} />
+            : React.createElement(OUTPUT_RENDERERS[agent.id] || GenericOutput, { data: output })
+          }
         </div>
       )}
     </div>
@@ -620,36 +622,181 @@ function FormalOutput({ data }) {
 }
 
 function RawOutput({ data }) {
-  // Format the raw text nicely instead of showing an error
   const text = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  // Split into paragraphs and render with basic formatting
   const paragraphs = text.split(/\n\n+/).filter(Boolean);
+
+  function renderInline(str) {
+    // Handle **bold**, *italic*, `code`
+    const parts = [];
+    let remaining = str;
+    let key = 0;
+    const regex = /(\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`)/g;
+    let lastIdx = 0;
+    let match;
+    while ((match = regex.exec(remaining)) !== null) {
+      if (match.index > lastIdx) parts.push(<span key={key++}>{remaining.slice(lastIdx, match.index)}</span>);
+      if (match[2]) parts.push(<strong key={key++} className="font-semibold text-neutral-900">{match[2]}</strong>);
+      else if (match[3]) parts.push(<em key={key++} className="italic">{match[3]}</em>);
+      else if (match[4]) parts.push(<code key={key++} className="bg-neutral-100 px-1 py-0.5 text-xs font-mono">{match[4]}</code>);
+      lastIdx = match.index + match[0].length;
+    }
+    if (lastIdx < remaining.length) parts.push(<span key={key++}>{remaining.slice(lastIdx)}</span>);
+    return parts.length > 0 ? parts : str;
+  }
+
   return (
     <div className="space-y-3">
       {paragraphs.map((para, i) => {
         const trimmed = para.trim();
-        // Detect headings (lines starting with # or ALL CAPS short lines)
-        if (trimmed.startsWith('#')) {
+        // Headings: # or ## or ###
+        if (/^#{1,4}\s/.test(trimmed)) {
           return <h4 key={i} className="font-mono text-xs font-bold uppercase tracking-widest text-neutral-500 mt-3">{trimmed.replace(/^#+\s*/, '')}</h4>;
         }
-        // Detect bullet points
-        if (trimmed.includes('\n-') || trimmed.startsWith('-') || trimmed.startsWith('*')) {
+        // Code blocks
+        if (trimmed.startsWith('```')) {
+          const code = trimmed.replace(/^```\w*\n?/, '').replace(/```$/, '');
+          return <pre key={i} className="bg-neutral-50 border border-neutral-200 p-3 text-xs font-mono overflow-x-auto"><code>{code}</code></pre>;
+        }
+        // Bullet/numbered lists
+        if (/^[-*]\s|^\d+\.\s/.test(trimmed) || trimmed.includes('\n-') || trimmed.includes('\n*') || /\n\d+\.\s/.test(trimmed)) {
           const lines = trimmed.split('\n');
           return (
             <ul key={i} className="space-y-1 ml-2">
               {lines.map((line, j) => (
                 <li key={j} className="text-sm text-neutral-700 leading-relaxed flex gap-2">
-                  {(line.startsWith('-') || line.startsWith('*')) && <span className="text-neutral-400 flex-shrink-0">-</span>}
-                  <span>{line.replace(/^[-*]\s*/, '')}</span>
+                  {/^[-*]\s/.test(line) && <span className="text-neutral-400 flex-shrink-0">-</span>}
+                  {/^\d+\.\s/.test(line) && <span className="text-neutral-400 flex-shrink-0 font-mono text-xs">{line.match(/^(\d+)\./)[1]}.</span>}
+                  <span>{renderInline(line.replace(/^[-*]\s*/, '').replace(/^\d+\.\s*/, ''))}</span>
                 </li>
               ))}
             </ul>
           );
         }
-        return <p key={i} className="text-sm text-neutral-700 leading-relaxed">{trimmed}</p>;
+        return <p key={i} className="text-sm text-neutral-700 leading-relaxed">{renderInline(trimmed)}</p>;
       })}
     </div>
   );
 }
+
+// Generic output renderer for custom agents and unknown formats
+function GenericOutput({ data }) {
+  if (!data || typeof data === 'string') {
+    return <RawOutput data={data || 'No output'} />;
+  }
+
+  // Render summary first if present
+  const keys = Object.keys(data).filter(k => !k.startsWith('_'));
+  const summaryKey = keys.find(k => /summary|overview|description/i.test(k));
+  const otherKeys = keys.filter(k => k !== summaryKey);
+
+  function formatKey(key) {
+    return key.replace(/([A-Z])/g, ' $1').replace(/[_-]/g, ' ').replace(/^\w/, c => c.toUpperCase()).trim();
+  }
+
+  function renderValue(val, depth = 0) {
+    if (val == null) return null;
+    if (typeof val === 'string') return <p className="text-sm text-neutral-700 leading-relaxed">{val}</p>;
+    if (typeof val === 'number') return <span className="text-sm font-mono text-neutral-700">{val}</span>;
+    if (typeof val === 'boolean') return <Badge variant={val ? 'success' : 'secondary'}>{val ? 'Yes' : 'No'}</Badge>;
+    if (Array.isArray(val)) {
+      if (val.length === 0) return null;
+      // Array of strings → bullet list
+      if (typeof val[0] === 'string') {
+        return (
+          <ul className="list-disc list-inside space-y-1 text-sm text-neutral-700">
+            {val.map((item, i) => <li key={i}>{item}</li>)}
+          </ul>
+        );
+      }
+      // Array of objects → cards
+      return (
+        <div className="space-y-2">
+          {val.map((item, i) => (
+            <div key={i} className="border border-neutral-200 p-3">
+              {typeof item === 'object' && item !== null ? (
+                Object.entries(item).map(([k, v]) => (
+                  <div key={k} className="mb-1 last:mb-0">
+                    <span className="text-xs font-medium text-neutral-500">{formatKey(k)}: </span>
+                    {typeof v === 'string' || typeof v === 'number'
+                      ? <span className="text-sm text-neutral-700">{String(v)}</span>
+                      : Array.isArray(v) && v.every(x => typeof x === 'string')
+                        ? <span className="text-sm text-neutral-700">{v.join(', ')}</span>
+                        : <span className="text-sm text-neutral-700">{JSON.stringify(v)}</span>
+                    }
+                  </div>
+                ))
+              ) : (
+                <span className="text-sm text-neutral-700">{String(item)}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    // Nested object
+    if (typeof val === 'object' && depth < 2) {
+      return (
+        <div className="ml-2 border-l-2 border-neutral-100 pl-3 space-y-1">
+          {Object.entries(val).map(([k, v]) => (
+            <div key={k}>
+              <span className="text-xs font-medium text-neutral-500">{formatKey(k)}: </span>
+              {typeof v === 'string' || typeof v === 'number'
+                ? <span className="text-sm text-neutral-700">{String(v)}</span>
+                : renderValue(v, depth + 1)
+              }
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return <pre className="text-xs font-mono text-neutral-500 overflow-x-auto">{JSON.stringify(val, null, 2)}</pre>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {summaryKey && data[summaryKey] && (
+        <p className="text-sm text-neutral-600 leading-relaxed">{data[summaryKey]}</p>
+      )}
+      {otherKeys.map(key => {
+        const val = data[key];
+        if (val == null || (Array.isArray(val) && val.length === 0)) return null;
+        // Score-like values get a progress bar
+        if (typeof val === 'number' && val >= 0 && val <= 100 && /score|prediction|confidence|feasibility|match/i.test(key)) {
+          return (
+            <div key={key} className="flex items-center gap-3">
+              <span className="text-sm font-medium text-neutral-500 w-32 shrink-0">{formatKey(key)}</span>
+              <div className="flex-1 h-2 bg-neutral-100 border border-neutral-200">
+                <div className="h-full bg-neutral-900 transition-all" style={{ width: `${val}%` }} />
+              </div>
+              <span className="text-sm font-mono text-neutral-600">{val}%</span>
+            </div>
+          );
+        }
+        return (
+          <div key={key}>
+            <SectionHeading>{formatKey(key)}</SectionHeading>
+            {renderValue(val)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Output renderer registry — known agents get dedicated renderers, custom agents fall back to GenericOutput
+const OUTPUT_RENDERERS = {
+  iris: IrisOutput,
+  atlas: AtlasOutput,
+  tensor: TensorOutput,
+  sage: SageOutput,
+  scribe: ScribeOutput,
+  'frontier-scribe': ScribeOutput,
+  nova: NovaOutput,
+  eureka: EurekaOutput,
+  flux: FluxOutput,
+  nexus: NexusOutput,
+  formal: FormalOutput,
+  'frontier-formal': FormalOutput,
+};
 
 export default AgentCard;

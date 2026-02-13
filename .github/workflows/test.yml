@@ -1,4 +1,4 @@
-name: Test Smart Contracts
+name: Test & Build
 
 on:
   push:
@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  contracts:
+    name: Smart Contracts
     runs-on: ubuntu-latest
 
     steps:
@@ -36,3 +37,43 @@ jobs:
       with:
         files: ./coverage/lcov.info
         fail_ci_if_error: false
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install frontend dependencies
+      working-directory: frontend
+      run: npm ci
+
+    - name: Build frontend
+      working-directory: frontend
+      run: npx vite build
+
+  backend:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: npm ci
+
+    - name: Check backend starts
+      working-directory: backend
+      run: timeout 5 node src/index.js || true

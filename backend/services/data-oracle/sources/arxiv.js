@@ -18,7 +18,8 @@ class ArxivSource {
       if (!res.ok) throw new Error(`arXiv API error: ${res.status}`);
       const xml = await res.text();
       return this._parseXml(xml);
-    } catch {
+    } catch (err) {
+      console.warn('[ArxivSource] API search failed:', err.message);
       return this._mockSearch(query);
     }
   }
@@ -31,7 +32,8 @@ class ArxivSource {
       const xml = await res.text();
       const results = this._parseXml(xml);
       return results[0] || null;
-    } catch {
+    } catch (err) {
+      console.warn('[ArxivSource] getDetails failed:', err.message);
       if (this.mockData) {
         return this.mockData.papers.find(p => p.arxivId === arxivId) || null;
       }

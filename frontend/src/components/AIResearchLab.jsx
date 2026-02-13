@@ -2,11 +2,13 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { AGENTS } from '../utils/agentDefinitions';
 import { FRONTIER_AGENTS } from '../utils/frontierDefinitions';
 import { runAgentPipeline, runReplicationPipeline } from '../utils/agentOrchestrator';
-import { getLLMConfig } from '../utils/llm';
+import { buildPipelineWithCustom } from '../utils/customAgents';
+import { estimatePipeline } from '../utils/tokenEstimator';
 import AgentCard from './AgentCard';
 import ReplicationReport from './ReplicationReport';
 import FrontierReport from './FrontierReport';
 import RALPHMode from './RALPHMode';
+import AgentReviewPanel from './AgentReviewPanel';
 import { SEED_PAPERS } from '../utils/seedData';
 import { PROBLEM_SETS } from '../utils/problemSets';
 import { Button } from '@/components/ui/button';
@@ -15,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { FadeIn } from '@/components/ui/fade-in';
-import { Search, Plus, X, Upload, FlaskConical, Telescope, ChevronRight, FileText, Puzzle, Network, Loader2, ExternalLink } from 'lucide-react';
+import { Search, Plus, X, Upload, FlaskConical, Telescope, ChevronRight, FileText, Puzzle, Network, Loader2, ExternalLink, Users, Zap, CheckCircle, AlertTriangle } from 'lucide-react';
 import { searchPapers } from '../utils/semanticScholar';
 
 const CUSTOM_PAPERS_KEY = 'lab-custom-papers';
@@ -50,7 +52,7 @@ function buildPromptedAgents(agents, customPrompt) {
 }
 
 function AIResearchLab({ labPaper }) {
-  const [papers] = useState(() => SEED_PAPERS);
+  const papers = SEED_PAPERS;
   const [customPapers, setCustomPapers] = useState(loadCustomPapers);
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState('replicate'); // 'replicate' | 'discover' | 'ralph'
@@ -60,29 +62,32 @@ function AIResearchLab({ labPaper }) {
   const [agentStates, setAgentStates] = useState(buildInitialStates(AGENTS));
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [finalReport, setFinalReport] = useState(null);
-  const [hasApiKey, setHasApiKey] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(true); // API keys are server-side now
   const [customPrompt, setCustomPrompt] = useState('');
   const [showCustomForm, setShowCustomForm] = useState(false);
-  const [formTitle, setFormTitle] = useState('');
-  const [formAuthors, setFormAuthors] = useState('');
-  const [formYear, setFormYear] = useState('');
-  const [formAbstract, setFormAbstract] = useState('');
-  const [formFields, setFormFields] = useState('');
+  const [form, setForm] = useState({ title: '', authors: '', year: '', abstract: '', fields: '' });
+  const updateForm = useCallback((field, value) => setForm(prev => ({ ...prev, [field]: value })), []);
   const [showConnections, setShowConnections] = useState(false);
   const [connectedPapers, setConnectedPapers] = useState([]);
   const [loadingConnections, setLoadingConnections] = useState(false);
+  const [showTokenDetail, setShowTokenDetail] = useState(false);
   const pipelineRef = useRef(null);
   const fileInputRef = useRef(null);
 
   const activeAgents = useMemo(
-    () => (mode === 'discover' || mode === 'ralph') ? FRONTIER_AGENTS : AGENTS,
+    () => {
+      if (mode === 'discover' || mode === 'ralph') return buildPipelineWithCustom(FRONTIER_AGENTS, 'discover');
+      return buildPipelineWithCustom(AGENTS, 'replicate');
+    },
     [mode]
   );
 
-  useEffect(() => {
-    const { apiKey } = getLLMConfig();
-    setHasApiKey(!!apiKey);
-  }, []);
+  // Token usage estimate for current pipeline + selection
+  const tokenEstimate = useMemo(() => {
+    const papers = mode === 'discover' ? selectedPapers : (selectedPaper ? [selectedPaper] : []);
+    if (papers.length === 0 || !papers[0]) return null;
+    return estimatePipeline(activeAgents, papers);
+  }, [activeAgents, selectedPaper, selectedPapers, mode]);
 
   // Fetch knowledge graph connections for selected paper
   const fetchConnections = useCallback(async (paper) => {
@@ -118,11 +123,13 @@ function AIResearchLab({ labPaper }) {
     setPipelineRunning(false);
     setFinalReport(null);
     if (newMode === 'discover' || newMode === 'ralph') {
-      setAgentStates(buildInitialStates(FRONTIER_AGENTS));
+      setAgentStates(buildInitialStates(buildPipelineWithCustom(FRONTIER_AGENTS, 'discover')));
       // Carry over selected paper to multi-select
       setSelectedPapers(selectedPaper ? [selectedPaper] : []);
+    } else if (newMode === 'agents') {
+      // No state reset needed for agent review tab
     } else {
-      setAgentStates(buildInitialStates(AGENTS));
+      setAgentStates(buildInitialStates(buildPipelineWithCustom(AGENTS, 'replicate')));
       // Carry over first selected paper
       if (selectedPapers.length > 0) setSelectedPaper(selectedPapers[0]);
       setSelectedPapers([]);
@@ -168,25 +175,21 @@ function AIResearchLab({ labPaper }) {
 
   // Custom paper form handlers
   const handleAddCustomPaper = useCallback(() => {
-    if (!formTitle.trim() || !formAbstract.trim()) return;
+    if (!form.title.trim() || !form.abstract.trim()) return;
     const newPaper = {
       id: `custom-${Date.now()}`,
-      title: formTitle.trim(),
-      authors: formAuthors ? formAuthors.split(',').map(a => a.trim()).filter(Boolean) : [],
-      year: formYear ? parseInt(formYear, 10) : new Date().getFullYear(),
-      abstract: formAbstract.trim(),
-      fieldsOfStudy: formFields ? formFields.split(',').map(f => f.trim()).filter(Boolean) : [],
+      title: form.title.trim(),
+      authors: form.authors ? form.authors.split(',').map(a => a.trim()).filter(Boolean) : [],
+      year: form.year ? parseInt(form.year, 10) : new Date().getFullYear(),
+      abstract: form.abstract.trim(),
+      fieldsOfStudy: form.fields ? form.fields.split(',').map(f => f.trim()).filter(Boolean) : [],
       citationCount: 0,
       source: 'custom',
     };
     const updated = [newPaper, ...customPapers];
     setCustomPapers(updated);
     saveCustomPapers(updated);
-    setFormTitle('');
-    setFormAuthors('');
-    setFormYear('');
-    setFormAbstract('');
-    setFormFields('');
+    setForm({ title: '', authors: '', year: '', abstract: '', fields: '' });
     setShowCustomForm(false);
     // Auto-select the new paper
     if (mode === 'discover' || mode === 'ralph') {
@@ -194,7 +197,7 @@ function AIResearchLab({ labPaper }) {
     } else {
       setSelectedPaper(newPaper);
     }
-  }, [formTitle, formAuthors, formYear, formAbstract, formFields, customPapers, mode]);
+  }, [form, customPapers, mode]);
 
   const handleRemoveCustomPaper = useCallback((paperId) => {
     const updated = customPapers.filter(p => p.id !== paperId);
@@ -210,7 +213,7 @@ function AIResearchLab({ labPaper }) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      setFormAbstract(ev.target.result);
+      updateForm('abstract', ev.target.result);
     };
     reader.readAsText(file);
     // Reset input so same file can be re-uploaded
@@ -219,9 +222,6 @@ function AIResearchLab({ labPaper }) {
 
   const startPipeline = useCallback(async () => {
     if (pipelineRunning) return;
-
-    const { apiKey } = getLLMConfig();
-    if (!apiKey) { setHasApiKey(false); return; }
 
     const papersForPipeline = mode === 'discover' ? selectedPapers : [selectedPaper];
     if (papersForPipeline.length === 0 || !papersForPipeline[0]) return;
@@ -242,10 +242,7 @@ function AIResearchLab({ labPaper }) {
     };
 
     // Inject custom prompt into agents if set
-    const promptedAgents = buildPromptedAgents(
-      mode === 'discover' ? FRONTIER_AGENTS : AGENTS,
-      customPrompt
-    );
+    const promptedAgents = buildPromptedAgents(activeAgents, customPrompt);
 
     if (mode === 'replicate') {
       pipelineRef.current = runAgentPipeline(promptedAgents, [selectedPaper], callbacks);
@@ -331,32 +328,32 @@ function AIResearchLab({ labPaper }) {
             <Input
               type="text"
               placeholder="Title *"
-              value={formTitle}
-              onChange={(e) => setFormTitle(e.target.value)}
+              value={form.title}
+              onChange={(e) => updateForm('title', e.target.value)}
             />
             <Input
               type="text"
               placeholder="Authors (comma-separated)"
-              value={formAuthors}
-              onChange={(e) => setFormAuthors(e.target.value)}
+              value={form.authors}
+              onChange={(e) => updateForm('authors', e.target.value)}
             />
             <Input
               type="text"
               placeholder="Year"
-              value={formYear}
-              onChange={(e) => setFormYear(e.target.value)}
+              value={form.year}
+              onChange={(e) => updateForm('year', e.target.value)}
             />
             <Textarea
               placeholder="Abstract / Content *"
-              value={formAbstract}
-              onChange={(e) => setFormAbstract(e.target.value)}
+              value={form.abstract}
+              onChange={(e) => updateForm('abstract', e.target.value)}
               rows={5}
             />
             <Input
               type="text"
               placeholder="Fields (comma-separated)"
-              value={formFields}
-              onChange={(e) => setFormFields(e.target.value)}
+              value={form.fields}
+              onChange={(e) => updateForm('fields', e.target.value)}
             />
             <div className="flex items-center gap-2">
               <Button
@@ -377,7 +374,7 @@ function AIResearchLab({ labPaper }) {
               <Button
                 size="sm"
                 onClick={handleAddCustomPaper}
-                disabled={!formTitle.trim() || !formAbstract.trim()}
+                disabled={!form.title.trim() || !form.abstract.trim()}
               >
                 Add Paper
               </Button>
@@ -511,9 +508,22 @@ function AIResearchLab({ labPaper }) {
               RALPH
             </span>
           </button>
+          <button
+            className={`px-6 py-3 text-xs font-mono uppercase tracking-widest transition-colors border-b-2 ${
+              mode === 'agents'
+                ? 'border-neutral-900 text-neutral-900 bg-white'
+                : 'border-transparent text-neutral-400 hover:text-neutral-600'
+            }`}
+            onClick={() => handleModeSwitch('agents')}
+          >
+            <Users className="inline-block w-3.5 h-3.5 mr-1.5 -mt-px" />
+            Agents
+          </button>
         </div>
 
-        {mode === 'ralph' ? (
+        {mode === 'agents' ? (
+          <AgentReviewPanel />
+        ) : mode === 'ralph' ? (
           <RALPHMode seedPapers={selectedPapers} hasApiKey={hasApiKey} />
         ) : !hasSelection ? (
           <div className="flex-1 flex flex-col items-center justify-center px-8 py-16">
@@ -622,6 +632,58 @@ function AIResearchLab({ labPaper }) {
                       className="text-sm"
                     />
                   </div>
+                  {/* Token predictor widget */}
+                  {tokenEstimate && (
+                    <div className="border border-neutral-200 bg-neutral-50 p-3">
+                      <div
+                        className="flex items-center justify-between cursor-pointer"
+                        onClick={() => setShowTokenDetail(!showTokenDetail)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-3.5 w-3.5 text-neutral-400" />
+                          <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-500">
+                            Est. Usage
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-neutral-600">
+                          <span className="font-mono">~{tokenEstimate.totalTokens.toLocaleString()} tokens</span>
+                          <span className="text-neutral-300">|</span>
+                          <span className="font-mono">~${tokenEstimate.estimatedCost.toFixed(4)}</span>
+                          <span className="text-neutral-300">|</span>
+                          <span className="text-[10px] text-neutral-400">{tokenEstimate.provider}</span>
+                          {tokenEstimate.allWithinLimits ? (
+                            <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                          ) : (
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                          )}
+                        </div>
+                      </div>
+                      {showTokenDetail && (
+                        <div className="mt-2 pt-2 border-t border-neutral-200 space-y-1">
+                          {tokenEstimate.perAgent.map(a => (
+                            <div key={a.id} className="flex items-center justify-between text-[10px] font-mono">
+                              <span className="text-neutral-600 truncate max-w-[120px]">{a.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-neutral-400">{a.inputTokens.toLocaleString()} in</span>
+                                <span className="text-neutral-400">{a.outputTokens.toLocaleString()} out</span>
+                                <span className="text-neutral-600 font-medium w-16 text-right">{a.tokens.toLocaleString()}</span>
+                                {a.withinLimits ? (
+                                  <CheckCircle className="h-3 w-3 text-green-500" />
+                                ) : (
+                                  <AlertTriangle className="h-3 w-3 text-amber-500" title="May exceed context window" />
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          {!tokenEstimate.allWithinLimits && (
+                            <p className="text-[10px] text-amber-600 mt-1">
+                              Some agents may exceed the context window for {tokenEstimate.provider}. Output may be truncated.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <Button
                     className="w-full"
                     onClick={startPipeline}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link2, ArrowRightLeft, Wallet, Activity, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { FadeIn } from '@/components/ui/fade-in';
-import { BACKEND_URL } from '../config';
+
 
 const DEMO_EVENTS = [
   { id: 'evt-1', chain: 'human', type: 'PaperSubmitted', data: { paperId: 1, author: '0x742d...4a3e' }, timestamp: new Date(Date.now() - 3600000).toISOString() },
@@ -18,7 +18,7 @@ function ChainCard({ name, chainId, role, connected, events, colour }) {
     <div className={`border p-6 ${colour}`}>
       <div className="flex items-start justify-between mb-4">
         <div>
-          <div className="flex items-centre gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1">
             <Link2 className="h-4 w-4" />
             <h3 className="font-mono text-sm uppercase tracking-widest">{name}</h3>
           </div>
@@ -60,8 +60,8 @@ function ChainStatus() {
   const fetchChainData = useCallback(async () => {
     try {
       const [statusRes, eventsRes] = await Promise.allSettled([
-        fetch(`${BACKEND_URL}/api/blockchain/status`).then(r => r.json()),
-        fetch(`${BACKEND_URL}/api/blockchain/events`).then(r => r.json()),
+        fetch(`/api/blockchain/status`).then(r => r.json()),
+        fetch(`/api/blockchain/events`).then(r => r.json()),
       ]);
       if (statusRes.status === 'fulfilled') setChainData(statusRes.value);
       if (eventsRes.status === 'fulfilled') setEvents(eventsRes.value);
@@ -110,21 +110,21 @@ function ChainStatus() {
       {/* Bridge */}
       <FadeIn delay={0.2}>
         <div className="border border-neutral-200 p-6 mb-8">
-          <div className="flex items-centre gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4">
             <ArrowRightLeft className="h-4 w-4 text-neutral-400" />
             <h3 className="font-mono text-xs uppercase tracking-widest text-neutral-400">Cross-Chain Bridge</h3>
           </div>
 
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="text-centre">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="text-center">
               <div className="text-2xl font-light">{bridgeData.transferCount}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Transfers</div>
             </div>
-            <div className="text-centre">
+            <div className="text-center">
               <div className="text-2xl font-light">{humanEvents.length}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Human Events</div>
             </div>
-            <div className="text-centre">
+            <div className="text-center">
               <div className="text-2xl font-light">{aiEvents.length}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">AI Events</div>
             </div>
@@ -145,10 +145,10 @@ function ChainStatus() {
           </h3>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {events.map(evt => (
-              <div key={evt.id} className="flex items-centre gap-3 text-xs font-mono py-1.5 border-b border-neutral-100 last:border-0">
+              <div key={evt.id} className="flex items-center gap-3 text-xs font-mono py-1.5 border-b border-neutral-100 last:border-0">
                 <Badge
                   variant="outline"
-                  className={`text-[9px] w-16 justify-centre ${evt.chain === 'human' ? 'border-blue-300 text-blue-600' : 'border-purple-300 text-purple-600'}`}
+                  className={`text-[9px] w-16 justify-center ${evt.chain === 'human' ? 'border-blue-300 text-blue-600' : 'border-purple-300 text-purple-600'}`}
                 >
                   {evt.chain === 'human' ? 'FLARE' : 'PLASMA'}
                 </Badge>

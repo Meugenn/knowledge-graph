@@ -6,7 +6,7 @@ import PaperDetail from './PaperDetail';
 import GNNPredictor from './GNNPredictor';
 import ResearchAgent from './ResearchAgent';
 import AddPapersPanel from './AddPapersPanel';
-import { findCitationPath } from '../utils/ragRetrieval';
+import { findCitationPath, searchByKeywords } from '../utils/ragRetrieval';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +14,8 @@ import { Switch } from '@/components/ui/switch';
 import { FadeIn } from '@/components/ui/fade-in';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
-import { Play, Pause, BrainCircuit, Plus, Compass, Download, ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { Play, Pause, BrainCircuit, Plus, Compass, Download, ChevronDown, ChevronUp, SlidersHorizontal, X, List, LayoutGrid, Trash2 } from 'lucide-react';
+import PaperListView from './PaperListView';
 
 // Field-based color mapping — covers both Semantic Scholar and OpenAlex field names
 const FIELD_COLORS = {
@@ -37,8 +38,18 @@ const FIELD_COLORS = {
   'Electrical and Electronic Engineering': '#667EEA',
   'Environmental Science': '#319795',
   'Earth and Planetary Sciences': '#319795',
-  'Psychology': '#D53F8C',
+  'Economics': '#B794F4',
   'Economics, Econometrics and Finance': '#B794F4',
+  'Business, Management and Accounting': '#B794F4',
+  'Political Science': '#F687B3',
+  'Law': '#F687B3',
+  'Sociology': '#D53F8C',
+  'Social Sciences': '#D53F8C',
+  'Psychology': '#D53F8C',
+  'Philosophy': '#D53F8C',
+  'Arts and Humanities': '#D53F8C',
+  'History': '#D53F8C',
+  'Linguistics and Language': '#D53F8C',
   'Other': '#A0AEC0',
 };
 
@@ -51,6 +62,9 @@ const FIELD_DISPLAY = {
   'Neuroscience': '#E53E3E',
   'Math & Engineering': '#9F7AEA',
   'Earth & Environment': '#319795',
+  'Economics & Finance': '#B794F4',
+  'Political Science & Law': '#F687B3',
+  'Social Sciences': '#D53F8C',
   'Other': '#A0AEC0',
 };
 
@@ -65,7 +79,9 @@ function fieldToCategory(fieldName) {
   if (lower.includes('neuro') || lower.includes('brain') || lower.includes('cognit')) return 'Neuroscience';
   if (lower.includes('math') || lower.includes('engineer') || lower.includes('electr')) return 'Math & Engineering';
   if (lower.includes('environ') || lower.includes('earth') || lower.includes('climate') || lower.includes('ecolog')) return 'Earth & Environment';
-  if (lower.includes('psychol')) return 'Other';
+  if (lower.includes('econom') || lower.includes('financ') || lower.includes('account') || lower.includes('business') || lower.includes('management')) return 'Economics & Finance';
+  if (lower.includes('politi') || lower.includes('law') || lower.includes('legal') || lower.includes('govern')) return 'Political Science & Law';
+  if (lower.includes('sociol') || lower.includes('social') || lower.includes('psychol') || lower.includes('philos') || lower.includes('human') || lower.includes('arts') || lower.includes('histor') || lower.includes('linguist') || lower.includes('anthropol')) return 'Social Sciences';
   return 'Other';
 }
 
@@ -96,7 +112,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
   const [colorByField, setColorByField] = useState(false);
   const fgRef = useRef();
   const containerRef = useRef();
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const outerRef = useRef();
+  const [dimensions, setDimensions] = useState({ width: typeof window !== 'undefined' ? window.innerWidth : 800, height: typeof window !== 'undefined' ? window.innerHeight - 150 : 600 });
 
   // GNN state
   const [showGNNPanel, setShowGNNPanel] = useState(false);
@@ -116,8 +133,17 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
   const [spawnIds, setSpawnIds] = useState(new Set());
   const spawnTimers = useRef(new Map());
 
+  // View mode: 'graph' or 'list'
+  const [viewMode, setViewMode] = useState('graph');
+
   // Controls collapsed state
   const [showControls, setShowControls] = useState(false);
+
+  // Manage papers state
+  const [fieldsToRemove, setFieldsToRemove] = useState(new Set());
+  const [sourcesToRemove, setSourcesToRemove] = useState(new Set());
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmRemoveAll, setConfirmRemoveAll] = useState(false);
 
   // Time animation state
   const [playing, setPlaying] = useState(false);
@@ -137,11 +163,26 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     window.addEventListener('resize', updateDimensions);
     // Also re-measure when controls or agent panel toggle
     const raf = requestAnimationFrame(updateDimensions);
+    const timer = setTimeout(updateDimensions, 100);
     return () => {
       window.removeEventListener('resize', updateDimensions);
       cancelAnimationFrame(raf);
+      clearTimeout(timer);
     };
   }, [showControls, showGNNPanel]);
+
+  // Dynamically compute container height from actual DOM position
+  useEffect(() => {
+    const measure = () => {
+      if (outerRef.current) {
+        const top = outerRef.current.getBoundingClientRect().top;
+        outerRef.current.style.height = `calc(100vh - ${top}px)`;
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
 
   // Initial graph loaded by App.jsx — no need to load here
 
@@ -173,8 +214,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
         if (!cancelled && papers.length > 0) {
           setGraphData(prev => mergeOnChainPapers(prev, papers, account));
         }
-      } catch (e) {
-        console.log('Could not load on-chain papers:', e.message);
+      } catch {
+        // On-chain papers unavailable — expected when wallet not connected
       }
     }
     loadOnChain();
@@ -191,31 +232,65 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     });
   }, [graphData.nodes]);
 
-  // Search handler
+  // Search handler — dual search (local graph + Semantic Scholar API) with highlighting
   const handleSearch = useCallback(async (e) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const query = searchQuery.trim();
+    if (!query) return;
 
     setSearching(true);
+    const matchedIds = new Set();
+
+    // Leg 1: Local search — match against papers already in the graph
+    const localResults = searchByKeywords(query, graphData.nodes, 50);
+    for (const { paper } of localResults) {
+      matchedIds.add(paper.id);
+    }
+
+    // Leg 2: Semantic Scholar API — fetch new papers and merge into graph
     try {
-      const results = await searchPapers(searchQuery.trim());
-      if (results.length > 0) {
-        setGraphData(prev => buildGraphFromPapers(results, prev));
+      const apiResults = await searchPapers(query);
+      if (apiResults.length > 0) {
+        for (const paper of apiResults) {
+          matchedIds.add(paper.id);
+        }
+        setGraphData(prev => buildGraphFromPapers(apiResults, prev));
       }
     } catch (err) {
       console.error('Search error:', err);
+      // Local results still get highlighted even if API fails
     }
+
+    // Apply highlights (always — clears stale highlights if nothing matched)
+    setHighlightedIds(matchedIds);
+    setPathIds(new Set());
+
+    // Zoom to fit all highlighted nodes after a brief delay for force layout
+    if (matchedIds.size > 0) {
+      setTimeout(() => {
+        if (fgRef.current) {
+          fgRef.current.zoomToFit(400, 60, node => matchedIds.has(node.id));
+        }
+      }, 300);
+    }
+
     setSearching(false);
-  }, [searchQuery]);
+  }, [searchQuery, graphData.nodes]);
+
+  // Clear search results and highlights
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+    setHighlightedIds(new Set());
+  }, []);
 
   // Add single paper (from PDF upload) — with spawn animation + auto-zoom
   const handleAddPaper = useCallback((paper) => {
     // Mark as spawning so paintNode renders the entrance animation
     const paperId = paper.id;
-    paper._spawnTime = Date.now();
+    const paperWithSpawn = { ...paper, _spawnTime: Date.now() };
 
     setGraphData(prev => ({
-      nodes: [...prev.nodes, paper],
+      nodes: [...prev.nodes, paperWithSpawn],
       links: prev.links,
     }));
 
@@ -296,6 +371,89 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
       return { nodes: Array.from(nodeMap.values()), links: allLinks };
     });
   }, []);
+
+  // Remove a single paper (and its links) from the graph
+  const handleRemovePaper = useCallback((paperId) => {
+    setGraphData(prev => ({
+      nodes: prev.nodes.filter(n => n.id !== paperId),
+      links: prev.links.filter(l => {
+        const src = typeof l.source === 'object' ? l.source.id : l.source;
+        const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+        return src !== paperId && tgt !== paperId;
+      }),
+    }));
+    if (selectedPaper?.id === paperId) setSelectedPaper(null);
+  }, [selectedPaper]);
+
+  // Compute field and source distributions for the Manage Papers panel
+  const fieldDistribution = useMemo(() => {
+    const counts = {};
+    for (const node of graphData.nodes) {
+      const field = node.fieldsOfStudy?.[0];
+      const cat = fieldToCategory(field);
+      counts[cat] = (counts[cat] || 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [graphData.nodes]);
+
+  const sourceDistribution = useMemo(() => {
+    const counts = {};
+    for (const node of graphData.nodes) {
+      const src = node.source || 'unknown';
+      counts[src] = (counts[src] || 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [graphData.nodes]);
+
+  const stagedRemovalCount = useMemo(() => {
+    if (fieldsToRemove.size === 0 && sourcesToRemove.size === 0) return 0;
+    return graphData.nodes.filter(node => {
+      const cat = fieldToCategory(node.fieldsOfStudy?.[0]);
+      const src = node.source || 'unknown';
+      return fieldsToRemove.has(cat) || sourcesToRemove.has(src);
+    }).length;
+  }, [graphData.nodes, fieldsToRemove, sourcesToRemove]);
+
+  const handleBulkRemove = useCallback(() => {
+    if (!confirmRemove) {
+      setConfirmRemove(true);
+      setTimeout(() => setConfirmRemove(false), 3000);
+      return;
+    }
+    const idsToRemove = new Set();
+    for (const node of graphData.nodes) {
+      const cat = fieldToCategory(node.fieldsOfStudy?.[0]);
+      const src = node.source || 'unknown';
+      if (fieldsToRemove.has(cat) || sourcesToRemove.has(src)) {
+        idsToRemove.add(node.id);
+      }
+    }
+    setGraphData(prev => ({
+      nodes: prev.nodes.filter(n => !idsToRemove.has(n.id)),
+      links: prev.links.filter(l => {
+        const s = typeof l.source === 'object' ? l.source.id : l.source;
+        const t = typeof l.target === 'object' ? l.target.id : l.target;
+        return !idsToRemove.has(s) && !idsToRemove.has(t);
+      }),
+    }));
+    if (selectedPaper && idsToRemove.has(selectedPaper.id)) setSelectedPaper(null);
+    setFieldsToRemove(new Set());
+    setSourcesToRemove(new Set());
+    setConfirmRemove(false);
+  }, [graphData.nodes, fieldsToRemove, sourcesToRemove, confirmRemove, selectedPaper, setGraphData]);
+
+  const handleRemoveAll = useCallback(() => {
+    if (!confirmRemoveAll) {
+      setConfirmRemoveAll(true);
+      setTimeout(() => setConfirmRemoveAll(false), 3000);
+      return;
+    }
+    setGraphData({ nodes: [], links: [] });
+    setSelectedPaper(null);
+    setConfirmRemoveAll(false);
+    setFieldsToRemove(new Set());
+    setSourcesToRemove(new Set());
+  }, [confirmRemoveAll, setGraphData]);
 
   // Time animation
   useEffect(() => {
@@ -586,18 +744,30 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
   }, []);
 
   return (
-    <div className="flex flex-col w-full overflow-auto" style={{ height: 'calc(100vh - 120px)' }}>
-      {/* Toolbar — always visible: search + action buttons in one compact row */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-200 bg-white flex-shrink-0">
+    <div ref={outerRef} className="flex flex-col w-full overflow-hidden" style={{ height: 'calc(100vh - 120px)' }}>
+      {/* Toolbar — sticky search bar that takes over when sub-nav hides */}
+      <div className="sticky top-0 z-[45] flex items-center gap-2 px-4 py-2 border-b border-neutral-200 bg-white flex-shrink-0 overflow-x-auto toolbar-scroll">
         {/* Search */}
         <form className="flex gap-2 flex-1 min-w-0" onSubmit={handleSearch}>
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search papers..."
-            className="flex-1 bg-white border-neutral-200 font-light text-neutral-700 placeholder:text-neutral-400 h-8 text-sm"
-          />
+          <div className="relative flex-1 min-w-0">
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search papers..."
+              className="flex-1 bg-white border-neutral-200 font-light text-neutral-700 placeholder:text-neutral-400 h-8 text-sm pr-7"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 transition-colors"
+                aria-label="Clear search"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
           <Button type="submit" variant="outline" disabled={searching} size="sm" className="border-neutral-300 font-mono text-[10px] uppercase tracking-widest h-8">
             {searching ? '...' : 'Search'}
           </Button>
@@ -612,8 +782,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           onClick={() => setShowGNNPanel(!showGNNPanel)}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <BrainCircuit className="mr-1 h-3.5 w-3.5" />
-          GNN
+          <BrainCircuit className="h-3.5 w-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">GNN</span>
         </Button>
 
         {/* Add Papers — unified dropdown */}
@@ -624,8 +794,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           onClick={() => setShowAddPanel(!showAddPanel)}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Add
+          <Plus className="h-3.5 w-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">Add</span>
         </Button>
         <AddPapersPanel
           isOpen={showAddPanel}
@@ -664,8 +834,20 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           }}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <Download className="mr-1 h-3.5 w-3.5" />
-          Export
+          <Download className="h-3.5 w-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">Export</span>
+        </Button>
+
+        {/* View mode toggle */}
+        <Button
+          variant={viewMode === 'list' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setViewMode(v => v === 'graph' ? 'list' : 'graph')}
+          className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
+          title={viewMode === 'graph' ? 'Switch to List view' : 'Switch to Graph view'}
+        >
+          {viewMode === 'graph' ? <List className="h-3.5 w-3.5 sm:mr-1" /> : <LayoutGrid className="h-3.5 w-3.5 sm:mr-1" />}
+          <span className="hidden sm:inline">{viewMode === 'graph' ? 'List' : 'Graph'}</span>
         </Button>
 
         <Separator orientation="vertical" className="h-6" />
@@ -676,9 +858,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           onClick={() => setShowControls(!showControls)}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <SlidersHorizontal className="mr-1 h-3.5 w-3.5" />
-          Filters
-          {showControls ? <ChevronUp className="ml-1 h-3 w-3" /> : <ChevronDown className="ml-1 h-3 w-3" />}
+          <SlidersHorizontal className="h-3.5 w-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">Filters</span>
+          <span className="hidden sm:inline">{showControls ? <ChevronUp className="ml-1 h-3 w-3" /> : <ChevronDown className="ml-1 h-3 w-3" />}</span>
         </Button>
         <Button
           variant={showAgent ? 'default' : 'outline'}
@@ -686,8 +868,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           onClick={() => setShowAgent(!showAgent)}
           className="font-mono text-[10px] uppercase tracking-widest h-8 flex-shrink-0"
         >
-          <Compass className="mr-1 h-3.5 w-3.5" />
-          Navigator
+          <Compass className="h-3.5 w-3.5 sm:mr-1" />
+          <span className="hidden sm:inline">Navigator</span>
         </Button>
       </div>
 
@@ -717,9 +899,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
 
             <Separator orientation="vertical" className="h-5" />
 
-            <div className="flex items-center gap-2 min-w-[160px]">
+            <div className="flex items-center gap-2 min-w-[200px]">
               <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 whitespace-nowrap">
-                Min: {filters.minCitations.toLocaleString()}
+                Min:
               </span>
               <input
                 type="range"
@@ -728,12 +910,23 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
                 step="1000"
                 value={filters.minCitations}
                 onChange={(e) => setFilters(f => ({ ...f, minCitations: Number(e.target.value) }))}
-                className="w-24 accent-neutral-500"
+                className="w-20 accent-neutral-500"
+              />
+              <Input
+                type="number"
+                min="0"
+                max={maxCitationInData}
+                value={filters.minCitations}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(Number(e.target.value) || 0, maxCitationInData));
+                  setFilters(f => ({ ...f, minCitations: v }));
+                }}
+                className="w-20 h-6 text-[10px] font-mono px-1.5 border-neutral-200"
               />
             </div>
-            <div className="flex items-center gap-2 min-w-[160px]">
+            <div className="flex items-center gap-2 min-w-[200px]">
               <span className="font-mono text-[10px] uppercase tracking-widest text-neutral-400 whitespace-nowrap">
-                Max: {filters.maxCitations.toLocaleString()}
+                Max:
               </span>
               <input
                 type="range"
@@ -742,7 +935,18 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
                 step="1000"
                 value={filters.maxCitations}
                 onChange={(e) => setFilters(f => ({ ...f, maxCitations: Number(e.target.value) }))}
-                className="w-24 accent-neutral-500"
+                className="w-20 accent-neutral-500"
+              />
+              <Input
+                type="number"
+                min="0"
+                max={maxCitationInData}
+                value={filters.maxCitations}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(Number(e.target.value) || 0, maxCitationInData));
+                  setFilters(f => ({ ...f, maxCitations: v }));
+                }}
+                className="w-20 h-6 text-[10px] font-mono px-1.5 border-neutral-200"
               />
             </div>
 
@@ -818,12 +1022,109 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
               ))}
             </div>
           )}
+
+          {/* ── Manage Papers ───────────────────────── */}
+          <Separator className="my-1" />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-neutral-400">
+                Manage — {graphData.nodes.length} papers
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`h-5 px-2 text-[9px] font-mono uppercase tracking-widest ${
+                  confirmRemoveAll ? 'text-red-600 hover:text-red-700 hover:bg-red-50' : 'text-neutral-400 hover:text-red-500'
+                }`}
+                onClick={handleRemoveAll}
+              >
+                <Trash2 className="h-2.5 w-2.5 mr-1" />
+                {confirmRemoveAll ? 'Click again to confirm' : 'Remove All'}
+              </Button>
+            </div>
+
+            {/* By Field */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-neutral-300 mr-1">Field:</span>
+              {fieldDistribution.map(([cat, count]) => {
+                const selected = fieldsToRemove.has(cat);
+                const color = FIELD_DISPLAY[cat] || '#A0AEC0';
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => {
+                      setFieldsToRemove(prev => {
+                        const next = new Set(prev);
+                        if (next.has(cat)) next.delete(cat); else next.add(cat);
+                        return next;
+                      });
+                      setConfirmRemove(false);
+                    }}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono border transition-colors ${
+                      selected
+                        ? 'border-red-300 bg-red-50 text-red-600 line-through'
+                        : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
+                    }`}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+                    {cat}: {count}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* By Source */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-mono text-[9px] uppercase tracking-widest text-neutral-300 mr-1">Source:</span>
+              {sourceDistribution.map(([src, count]) => {
+                const selected = sourcesToRemove.has(src);
+                const label = src === 'semantic_scholar' ? 'S2' : src === 'pdf_upload' ? 'PDF' : src === 'openalex' ? 'OpenAlex' : src === 'crossref' ? 'Crossref' : src === 'worldbank' ? 'World Bank' : src;
+                return (
+                  <button
+                    key={src}
+                    onClick={() => {
+                      setSourcesToRemove(prev => {
+                        const next = new Set(prev);
+                        if (next.has(src)) next.delete(src); else next.add(src);
+                        return next;
+                      });
+                      setConfirmRemove(false);
+                    }}
+                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-mono border transition-colors ${
+                      selected
+                        ? 'border-red-300 bg-red-50 text-red-600 line-through'
+                        : 'border-neutral-200 bg-white text-neutral-600 hover:border-neutral-400'
+                    }`}
+                  >
+                    {label}: {count}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Remove Selected button */}
+            {stagedRemovalCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={`h-6 text-[10px] font-mono uppercase tracking-widest ${
+                  confirmRemove
+                    ? 'border-red-400 bg-red-50 text-red-600 hover:bg-red-100'
+                    : 'border-red-200 text-red-500 hover:bg-red-50'
+                }`}
+                onClick={handleBulkRemove}
+              >
+                <Trash2 className="h-3 w-3 mr-1" />
+                {confirmRemove ? `Confirm: remove ${stagedRemovalCount} papers` : `Remove ${stagedRemovalCount} papers`}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
       {/* GNN Panel */}
       {showGNNPanel && (
-        <div className="flex-shrink-0 max-h-[30vh] overflow-y-auto">
+        <div className={`flex-shrink-0 overflow-y-auto ${showControls ? 'max-h-[20vh]' : 'max-h-[30vh]'}`}>
           <GNNPredictor
             graphData={graphData}
             onPredictionsReady={handlePredictions}
@@ -831,8 +1132,8 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
         </div>
       )}
 
-      {/* Graph — fills all remaining space */}
-      <div className="graph-canvas-container relative flex-1 min-h-0" ref={containerRef}>
+      {/* Graph / List — fills all remaining space */}
+      <div className="graph-canvas-container relative flex-1 min-h-[200px]" ref={containerRef}>
         {loading ? (
           <div className="flex flex-col items-center justify-center gap-4 py-24">
             <div className="flex flex-col items-center gap-3">
@@ -842,6 +1143,12 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
             </div>
             <p className="font-mono text-xs uppercase tracking-widest text-neutral-500">Loading knowledge graph...</p>
           </div>
+        ) : viewMode === 'list' ? (
+          <PaperListView
+            nodes={filteredData.nodes}
+            onSelectPaper={handleNodeClick}
+            onRemovePaper={handleRemovePaper}
+          />
         ) : (
           <ForceGraph2D
             ref={fgRef}
@@ -872,8 +1179,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           />
         )}
 
-        {/* Legend */}
-        <div className="absolute bottom-3 left-3 flex flex-wrap items-center gap-x-3 gap-y-1 bg-neutral-900/80 backdrop-blur-sm border border-neutral-700/50 px-3 py-2">
+        {/* Legend — only in graph view */}
+        {viewMode === 'graph' && (
+        <div className="absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] sm:max-w-[480px] flex flex-wrap items-center gap-x-3 gap-y-1 bg-neutral-900/80 backdrop-blur-sm border border-neutral-700/50 px-3 py-2">
           {colorByField ? (
             <>
               {Object.entries(FIELD_DISPLAY).map(([field, color]) => (
@@ -913,13 +1221,14 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
             {stats.total} papers &middot; {filteredData.links.filter(l => !l.predicted).length} citations
           </span>
         </div>
+        )}
       </div>
 
       {/* Research Agent Sidebar */}
       {showAgent && (
         <div className="fixed inset-0 z-[999] bg-black/20" onClick={() => setShowAgent(false)}>
           <div
-            className="absolute right-0 top-0 h-full w-[400px] max-w-[90vw] bg-white border-l border-neutral-200 shadow-xl"
+            className="absolute right-0 top-0 h-full w-full sm:w-[400px] sm:max-w-[90vw] bg-white border-l border-neutral-200 shadow-xl"
             onClick={e => e.stopPropagation()}
           >
             <ResearchAgent
@@ -937,6 +1246,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
         paper={selectedPaper}
         onClose={() => setSelectedPaper(null)}
         onImport={handleImport}
+        onRemove={(paper) => {
+          handleRemovePaper(paper.id);
+        }}
         onMakeRunnable={(paper) => {
           setSelectedPaper(null);
           if (onMakeRunnable) onMakeRunnable(paper);

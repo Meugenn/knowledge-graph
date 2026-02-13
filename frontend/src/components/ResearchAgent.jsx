@@ -1,14 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Settings, X, ArrowUp, ExternalLink, Eye, BookOpen } from 'lucide-react';
 import { buildSystemPrompt, assembleContext, findCitationPath } from '../utils/ragRetrieval';
-import { PROVIDERS, detectProvider, callClaude, callOpenAI } from '../utils/llm';
+import { PROVIDERS, callLLM, hasStoredApiKey, openApiSettings } from '../utils/llm';
 import { searchPapers, buildGraphFromPapers } from '../utils/semanticScholar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 
-const API_KEY_STORAGE = 'rg_llm_api_key';
-const API_URL_STORAGE = 'rg_llm_api_url';
 const PROVIDER_STORAGE = 'rg_llm_provider';
 const MODEL_STORAGE = 'rg_llm_model';
 
@@ -176,12 +174,8 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [searchingPapers, setSearchingPapers] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(API_KEY_STORAGE) || '');
   const [provider, setProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE) || 'claude');
-  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem(API_URL_STORAGE) || '');
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_STORAGE) || '');
-  // Separate state for setup form so typing doesn't unmount the screen
-  const [inputKey, setInputKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -191,30 +185,14 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   }, [messages]);
 
   useEffect(() => {
-    if (apiKey) inputRef.current?.focus();
-  }, [apiKey]);
-
-  const saveApiKey = useCallback((key) => {
-    setApiKey(key);
-    localStorage.setItem(API_KEY_STORAGE, key);
-    const detected = detectProvider(key);
-    setProvider(detected);
-    localStorage.setItem(PROVIDER_STORAGE, detected);
+    inputRef.current?.focus();
   }, []);
 
   const saveProvider = useCallback((p) => {
     setProvider(p);
     localStorage.setItem(PROVIDER_STORAGE, p);
-    setApiUrl('');
     setModel('');
-    localStorage.removeItem(API_URL_STORAGE);
     localStorage.removeItem(MODEL_STORAGE);
-  }, []);
-
-  const saveApiUrl = useCallback((url) => {
-    setApiUrl(url);
-    if (url) localStorage.setItem(API_URL_STORAGE, url);
-    else localStorage.removeItem(API_URL_STORAGE);
   }, []);
 
   const saveModel = useCallback((m) => {
@@ -226,10 +204,6 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   const getEffectiveModel = useCallback(() => {
     return model || PROVIDERS[provider]?.defaultModel || 'claude-sonnet-4-5-20250929';
   }, [model, provider]);
-
-  const getEffectiveUrl = useCallback(() => {
-    return apiUrl || PROVIDERS[provider]?.url || '';
-  }, [apiUrl, provider]);
 
   const handleViewInGraph = useCallback((paper) => {
     if (onGraphAction) onGraphAction({ type: 'zoom', id: paper.id });
@@ -243,7 +217,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   }, [onGraphAction]);
 
   const sendMessage = useCallback(async (userMessage) => {
-    if (!userMessage.trim() || !apiKey || loading) return;
+    if (!userMessage.trim() || loading) return;
 
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
@@ -262,15 +236,7 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         { role: 'user', content: userMessage + contextMsg },
       ];
 
-      let rawContent;
-      const effectiveModel = getEffectiveModel();
-      const effectiveUrl = getEffectiveUrl();
-
-      if (provider === 'claude') {
-        rawContent = await callClaude(apiKey, effectiveModel, systemPrompt, chatMessages, effectiveUrl);
-      } else {
-        rawContent = await callOpenAI(apiKey, effectiveModel, systemPrompt, chatMessages, effectiveUrl);
-      }
+      const rawContent = await callLLM(systemPrompt, chatMessages);
 
       const { text: cleanContent, actions, citedNumbers } = parseResponse(rawContent);
 
@@ -314,15 +280,18 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
         citedNumbers: finalCitedNumbers,
       }]);
     } catch (err) {
+      const isAuthError = /api key|unauthorized|401|403/i.test(err.message);
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Error: ${err.message}. Check your API key.`,
+        content: isAuthError
+          ? `Error: ${err.message}. [OPEN_SETTINGS]`
+          : `Error: ${err.message}`,
         isError: true,
       }]);
     }
 
     setLoading(false);
-  }, [apiKey, provider, graphData, messages, loading, onGraphAction, getEffectiveModel, getEffectiveUrl, onAddPapers]);
+  }, [graphData, messages, loading, onGraphAction, onAddPapers]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -345,10 +314,20 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
     }
 
     if (msg.isError) {
+      const hasSettingsLink = msg.content.includes('[OPEN_SETTINGS]');
+      const errorText = msg.content.replace(' [OPEN_SETTINGS]', '');
       return (
         <div key={idx} className="mb-3">
           <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded">
-            {msg.content}
+            {errorText}
+            {hasSettingsLink && (
+              <button
+                onClick={openApiSettings}
+                className="block mt-1.5 text-[10px] font-mono uppercase tracking-widest text-red-500 hover:text-red-800 underline underline-offset-2"
+              >
+                Configure API Key
+              </button>
+            )}
           </div>
         </div>
       );
@@ -393,71 +372,6 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
   };
 
   // ============================================================
-  // No API key — setup screen
-  // ============================================================
-
-  if (!apiKey) {
-    return (
-      <div className="flex flex-col h-full bg-white">
-        <div className="flex items-center justify-between p-4 border-b border-neutral-200">
-          <span className="font-mono text-xs font-bold uppercase tracking-widest">Research Navigator</span>
-          <button onClick={onClose} className="text-neutral-400 hover:text-neutral-900 transition-colors">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <h4 className="text-lg mb-2">Connect an LLM</h4>
-          <p className="text-sm text-neutral-500 mb-6 max-w-xs">
-            Enter an API key to power the Research Navigator.
-          </p>
-          <div className="w-full max-w-xs space-y-3">
-            <div className="space-y-1">
-              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Provider</label>
-              <select
-                className="w-full h-9 border border-neutral-200 bg-white px-3 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
-                value={provider}
-                onChange={(e) => saveProvider(e.target.value)}
-              >
-                {Object.entries(PROVIDERS).map(([key, p]) => (
-                  <option key={key} value={key}>{p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">API Key</label>
-              <Input
-                type="password"
-                placeholder={PROVIDERS[provider]?.placeholder || 'API key...'}
-                value={inputKey}
-                onChange={(e) => setInputKey(e.target.value)}
-              />
-            </div>
-            {provider === 'custom' && (
-              <div className="space-y-1">
-                <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">Endpoint</label>
-                <Input type="text" placeholder="https://..." value={apiUrl} onChange={(e) => saveApiUrl(e.target.value)} />
-              </div>
-            )}
-            <div className="space-y-1">
-              <label className="font-mono text-[10px] uppercase tracking-widest text-neutral-400">
-                Model <span className="normal-case tracking-normal">(optional)</span>
-              </label>
-              <Input type="text" placeholder={PROVIDERS[provider]?.defaultModel || 'model'} value={model} onChange={(e) => saveModel(e.target.value)} />
-            </div>
-            <Button
-              className="w-full bg-neutral-900 text-white hover:bg-neutral-800 font-mono text-xs uppercase tracking-widest"
-              onClick={() => saveApiKey(inputKey)}
-              disabled={!inputKey.trim()}
-            >
-              Connect
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================
   // Main chat UI
   // ============================================================
 
@@ -470,10 +384,10 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
           <Badge variant="outline" className="font-mono text-[9px] h-4">{PROVIDERS[provider]?.label || provider}</Badge>
         </div>
         <div className="flex items-center gap-1">
-          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={() => setShowSettings(!showSettings)}>
+          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={() => setShowSettings(!showSettings)} aria-label="Settings">
             <Settings className="h-3.5 w-3.5" />
           </button>
-          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={onClose}>
+          <button className="text-neutral-400 hover:text-neutral-900 transition-colors p-1" onClick={onClose} aria-label="Close">
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
@@ -489,21 +403,15 @@ function ResearchAgent({ graphData, onGraphAction, onAddPapers, onClose }) {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">Key</label>
-            <Input type="password" value={apiKey} onChange={(e) => saveApiKey(e.target.value)} className="h-6 text-[11px]" />
-          </div>
-          {provider === 'custom' && (
-            <div className="flex items-center gap-2">
-              <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">URL</label>
-              <Input type="text" value={apiUrl} onChange={(e) => saveApiUrl(e.target.value)} placeholder="https://..." className="h-6 text-[11px]" />
-            </div>
-          )}
-          <div className="flex items-center gap-2">
             <label className="font-mono text-[9px] uppercase tracking-widest text-neutral-400 w-14">Model</label>
             <Input type="text" value={model} onChange={(e) => saveModel(e.target.value)} placeholder={PROVIDERS[provider]?.defaultModel || 'model'} className="h-6 text-[11px]" />
           </div>
           <div className="text-[9px] text-neutral-400 font-mono">
             {graphData.nodes.length.toLocaleString()} papers &middot; {getEffectiveModel()}
+            {' '}&middot;{' '}
+            <span className={hasStoredApiKey() ? 'text-green-600' : 'text-neutral-400'}>
+              {hasStoredApiKey() ? 'Key set' : 'Server key'}
+            </span>
           </div>
         </div>
       )}

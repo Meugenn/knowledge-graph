@@ -1,15 +1,22 @@
-// Bulk import papers from OpenAlex — 250M+ works, free API, full citation graph
-// referenced_works comes back in every response = no extra calls for edges
+// Bulk import papers from multiple free academic APIs
+// Sources: OpenAlex (250M+ works), Crossref (130M+ works), World Bank Open Knowledge
+// Each query can specify a `source` field; defaults to 'openalex'
+
+import { normalizeOpenAlexWork, normalizeCrossrefWork, normalizeWorldBankDoc } from './normalization';
 
 const OPENALEX_BASE = 'https://api.openalex.org';
+const CROSSREF_BASE = 'https://api.crossref.org';
+const WORLDBANK_BASE = 'https://search.worldbank.org/api/v2/wds';
 const CACHE_KEY = 'rg_bulk_openalex_v2';
 const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
 // Polite pool: adding email gives priority and avoids shared rate limits
 const MAILTO = 'research-graph-demo@example.com';
 
+// Per-request timeout to prevent getting stuck on one dataset
+const FETCH_TIMEOUT_MS = 12000;
+
 // Diverse queries across academic fields — each fetches 200 papers via cursor pagination
-// OpenAlex field IDs: https://docs.openalex.org/api-entities/topics
 const DEFAULT_QUERIES = [
   // Computer Science / AI
   { filter: 'default.search:deep learning transformer', label: 'Deep Learning', pages: 3 },
@@ -40,86 +47,199 @@ const DEFAULT_QUERIES = [
   { filter: 'default.search:metal organic framework porous materials', label: 'MOFs', pages: 1 },
 ];
 
-// Reconstruct abstract from OpenAlex inverted index format
-function reconstructAbstract(invertedIndex) {
-  if (!invertedIndex) return '';
-  const words = [];
-  for (const [word, positions] of Object.entries(invertedIndex)) {
-    for (const pos of positions) {
-      words[pos] = word;
-    }
-  }
-  return words.join(' ').slice(0, 500); // cap at 500 chars
-}
+// ────────────────────────────────────────────────────────────────
+// Fetch utilities
+// ────────────────────────────────────────────────────────────────
 
-// Extract short OpenAlex ID from full URL: "https://openalex.org/W123" -> "W123"
-function oaId(fullId) {
-  if (!fullId) return null;
-  if (fullId.startsWith('https://openalex.org/')) return fullId.slice(20);
-  return fullId;
-}
-
-// Map OpenAlex topic domains to our field names
-function mapFieldsOfStudy(work) {
-  if (!work.topics || work.topics.length === 0) {
-    // Fallback to concepts if topics missing
-    if (work.concepts && work.concepts.length > 0) {
-      return work.concepts.slice(0, 2).map(c => c.display_name);
-    }
-    return [];
-  }
-  const fields = [];
-  const seen = new Set();
-  for (const topic of work.topics.slice(0, 3)) {
-    const domain = topic.domain?.display_name;
-    const field = topic.field?.display_name;
-    const name = field || domain || topic.display_name;
-    if (name && !seen.has(name)) {
-      seen.add(name);
-      fields.push(name);
-    }
-  }
-  return fields;
-}
-
-// Normalize an OpenAlex work to our graph node format
-function normalizeWork(work) {
-  const id = oaId(work.id);
-  if (!id || !work.display_name) return null;
-
-  return {
-    id,
-    paperId: id,
-    title: work.display_name,
-    authors: (work.authorships || []).slice(0, 8).map(a => a.author?.display_name || 'Unknown'),
-    year: work.publication_year,
-    citationCount: work.cited_by_count || 0,
-    abstract: reconstructAbstract(work.abstract_inverted_index),
-    fieldsOfStudy: mapFieldsOfStudy(work),
-    doi: work.doi ? work.doi.replace('https://doi.org/', '') : null,
-    source: 'openalex',
-    val: Math.max(3, Math.log10((work.cited_by_count || 0) + 1) * 3),
-    // Store referenced_works temporarily for edge construction
-    _refs: (work.referenced_works || []).map(oaId).filter(Boolean),
-  };
-}
-
-async function fetchPage(url) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  }
+}
+
+async function fetchPageSafe(url, sourceName = 'API', signal = null) {
+  try {
+    if (signal?.aborted) return null;
+    const res = await fetchWithTimeout(url, signal ? { signal } : {});
     if (res.status === 429) {
-      // Rate limited — wait 2s and retry once
       await new Promise(r => setTimeout(r, 2000));
-      const retry = await fetch(url);
+      if (signal?.aborted) return null;
+      const retry = await fetchWithTimeout(url, signal ? { signal } : {});
       if (retry.ok) return await retry.json();
+      console.warn(`${sourceName}: rate-limited, retry also failed (${retry.status})`);
       return null;
     }
-    if (res.ok) return await res.json();
+    if (!res.ok) {
+      console.warn(`${sourceName}: HTTP ${res.status} for ${url.slice(0, 120)}`);
+      return null;
+    }
+    return await res.json();
   } catch (e) {
-    console.warn('OpenAlex fetch failed:', e.message);
+    if (e.name === 'AbortError') return null;
+    console.warn(`${sourceName} fetch failed:`, e.message);
+    return null;
   }
-  return null;
 }
+
+// ────────────────────────────────────────────────────────────────
+// Source-specific fetch queries
+// ────────────────────────────────────────────────────────────────
+
+async function fetchOpenAlexQuery(query, allPapers, onProgress, queryIndex, totalQueries, totalFetched, signal) {
+  const { filter, label, pages = 1 } = query;
+  let cursor = '*';
+  let added = 0;
+
+  for (let page = 0; page < pages; page++) {
+    if (signal?.aborted) break;
+    if (onProgress) {
+      onProgress({
+        phase: 'fetching',
+        field: label,
+        queryIndex,
+        totalQueries,
+        total: totalFetched + added,
+        page: page + 1,
+        totalPages: pages,
+      });
+    }
+
+    const url = `${OPENALEX_BASE}/works?filter=${encodeURIComponent(filter)},cited_by_count:>5&per-page=200&cursor=${cursor}&sort=cited_by_count:desc&select=id,doi,display_name,publication_year,authorships,cited_by_count,referenced_works,topics,concepts,abstract_inverted_index&mailto=${MAILTO}`;
+
+    const data = await fetchPageSafe(url, 'OpenAlex', signal);
+    if (!data?.results) break;
+
+    for (const work of data.results) {
+      const paper = normalizeOpenAlexWork(work);
+      if (paper && !allPapers.has(paper.id)) {
+        allPapers.set(paper.id, paper);
+        added++;
+      }
+    }
+
+    cursor = data.meta?.next_cursor;
+    if (!cursor) break;
+
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  return added;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Crossref fetch  (free, no auth, 130M+ works)
+// ────────────────────────────────────────────────────────────────
+
+async function fetchCrossrefQuery(query, allPapers, onProgress, queryIndex, totalQueries, totalFetched, signal) {
+  const { filter, label, pages = 1, prefix } = query;
+  const rowsPerPage = 50;
+  let added = 0;
+
+  for (let page = 0; page < pages; page++) {
+    if (signal?.aborted) break;
+    if (onProgress) {
+      onProgress({
+        phase: 'fetching',
+        field: label,
+        queryIndex,
+        totalQueries,
+        total: totalFetched + added,
+        page: page + 1,
+        totalPages: pages,
+      });
+    }
+
+    const offset = page * rowsPerPage;
+    let url = `${CROSSREF_BASE}/works?query=${encodeURIComponent(filter)}&rows=${rowsPerPage}&offset=${offset}&sort=is-referenced-by-count&order=desc&mailto=${MAILTO}`;
+    if (prefix) {
+      url += `&filter=prefix:${encodeURIComponent(prefix)}`;
+    }
+
+    const data = await fetchPageSafe(url, 'Crossref', signal);
+    if (!data?.message?.items) break;
+
+    for (const item of data.message.items) {
+      const paper = normalizeCrossrefWork(item);
+      if (paper && !allPapers.has(paper.id)) {
+        allPapers.set(paper.id, paper);
+        added++;
+      }
+    }
+
+    // If fewer results than requested, no more pages
+    if (data.message.items.length < rowsPerPage) break;
+
+    await new Promise(r => setTimeout(r, 200)); // Crossref asks for politeness
+  }
+
+  return added;
+}
+
+// ────────────────────────────────────────────────────────────────
+// World Bank Open Knowledge Repository fetch (free, no auth)
+// ────────────────────────────────────────────────────────────────
+
+async function fetchWorldBankQuery(query, allPapers, onProgress, queryIndex, totalQueries, totalFetched, signal) {
+  const { filter, label, pages = 1 } = query;
+  const rowsPerPage = 50;
+  let added = 0;
+
+  for (let page = 0; page < pages; page++) {
+    if (signal?.aborted) break;
+    if (onProgress) {
+      onProgress({
+        phase: 'fetching',
+        field: label,
+        queryIndex,
+        totalQueries,
+        total: totalFetched + added,
+        page: page + 1,
+        totalPages: pages,
+      });
+    }
+
+    const offset = page * rowsPerPage;
+    const url = `${WORLDBANK_BASE}?format=json&qterm=${encodeURIComponent(filter)}&rows=${rowsPerPage}&os=${offset}&fl=id,display_title,authr,docdt,abstracts,topic,doi&apilang=en`;
+
+    const data = await fetchPageSafe(url, 'World Bank', signal);
+    if (!data?.documents) break;
+
+    // World Bank returns documents as an object keyed by ID, plus metadata keys
+    const docs = Object.values(data.documents).filter(
+      d => d && typeof d === 'object' && d.display_title
+    );
+
+    if (docs.length === 0) break;
+
+    for (const doc of docs) {
+      const paper = normalizeWorldBankDoc(doc);
+      if (paper && !allPapers.has(paper.id)) {
+        allPapers.set(paper.id, paper);
+        added++;
+      }
+    }
+
+    if (docs.length < rowsPerPage) break;
+
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  return added;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Cache (localStorage)
+// ────────────────────────────────────────────────────────────────
 
 function getCachedData() {
   try {
@@ -150,7 +270,11 @@ function setCachedData(data) {
   }
 }
 
-export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = null) {
+// ────────────────────────────────────────────────────────────────
+// Main bulk fetch — routes each query to the appropriate source
+// ────────────────────────────────────────────────────────────────
+
+export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = null, signal = null) {
   // Only use cache for the default full import (not custom collection queries)
   const isDefaultQueries = queries === DEFAULT_QUERIES;
   if (isDefaultQueries) {
@@ -166,51 +290,57 @@ export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = nu
     }
   }
 
-  const allPapers = new Map(); // oaId -> normalized paper
+  const allPapers = new Map();
   let totalFetched = 0;
-  let queryIndex = 0;
 
-  for (const query of queries) {
-    const { filter, label, pages = 1 } = query;
-    let cursor = '*';
+  for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
+    if (signal?.aborted) break;
+    const query = queries[queryIndex];
+    const source = query.source || 'openalex';
 
-    for (let page = 0; page < pages; page++) {
-      if (onProgress) {
-        onProgress({
-          phase: 'fetching',
-          field: label,
-          queryIndex,
-          totalQueries: queries.length,
-          total: totalFetched,
-          page: page + 1,
-          totalPages: pages,
-        });
+    try {
+      let added = 0;
+
+      switch (source) {
+        case 'crossref':
+          added = await fetchCrossrefQuery(query, allPapers, onProgress, queryIndex, queries.length, totalFetched, signal);
+          break;
+        case 'worldbank':
+          added = await fetchWorldBankQuery(query, allPapers, onProgress, queryIndex, queries.length, totalFetched, signal);
+          break;
+        case 'openalex':
+        default:
+          added = await fetchOpenAlexQuery(query, allPapers, onProgress, queryIndex, queries.length, totalFetched, signal);
+          break;
       }
 
-      const url = `${OPENALEX_BASE}/works?filter=${encodeURIComponent(filter)},cited_by_count:>5&per-page=200&cursor=${cursor}&sort=cited_by_count:desc&select=id,doi,display_name,publication_year,authorships,cited_by_count,referenced_works,topics,concepts,abstract_inverted_index&mailto=${MAILTO}`;
-
-      const data = await fetchPage(url);
-      if (!data?.results) break;
-
-      for (const work of data.results) {
-        const paper = normalizeWork(work);
-        if (paper && !allPapers.has(paper.id)) {
-          allPapers.set(paper.id, paper);
-          totalFetched++;
-        }
-      }
-
-      // Get next cursor
-      cursor = data.meta?.next_cursor;
-      if (!cursor) break;
-
-      // Small delay between pages
-      await new Promise(r => setTimeout(r, 50));
+      totalFetched += added;
+    } catch (err) {
+      // Per-query error isolation — log and continue to next query
+      console.warn(`[bulkImport] Query "${query.label}" (${source}) failed:`, err.message);
     }
 
-    queryIndex++;
     // Small delay between queries
     await new Promise(r => setTimeout(r, 30));
+  }
+
+  // Cross-source DOI deduplication: keep the entry with higher citationCount
+  const doiIndex = new Map();
+  for (const [id, paper] of allPapers) {
+    if (!paper.doi) continue;
+    const normDoi = paper.doi.toLowerCase().trim();
+    const existing = doiIndex.get(normDoi);
+    if (existing) {
+      const existingPaper = allPapers.get(existing);
+      if ((paper.citationCount || 0) > (existingPaper?.citationCount || 0)) {
+        allPapers.delete(existing);
+        doiIndex.set(normDoi, id);
+      } else {
+        allPapers.delete(id);
+      }
+    } else {
+      doiIndex.set(normDoi, id);
+    }
   }
 
   // Build citation edges where both papers are in our set
@@ -222,16 +352,17 @@ export async function bulkFetchPapers(queries = DEFAULT_QUERIES, onProgress = nu
   const citationSet = new Set();
 
   for (const paper of papers) {
-    for (const refId of paper._refs) {
-      if (paperIds.has(refId)) {
-        const key = `${paper.id}->${refId}`;
-        if (!citationSet.has(key)) {
-          citationSet.add(key);
-          citations.push({ source: paper.id, target: refId });
+    if (paper._refs) {
+      for (const refId of paper._refs) {
+        if (paperIds.has(refId)) {
+          const key = `${paper.id}->${refId}`;
+          if (!citationSet.has(key)) {
+            citationSet.add(key);
+            citations.push({ source: paper.id, target: refId });
+          }
         }
       }
     }
-    // Clean up temp reference data
     delete paper._refs;
   }
 

@@ -1,12 +1,15 @@
 const path = require('path');
 const fs = require('fs');
 
+/** @mock — No real HuggingFace API integration. Returns data from fixtures when available. */
 class HuggingFaceSource {
   constructor(opts = {}) {
     this.mockPath = path.join(__dirname, '../../../fixtures/huggingface-sample.json');
     this.mockData = null;
     if (fs.existsSync(this.mockPath)) {
       this.mockData = JSON.parse(fs.readFileSync(this.mockPath, 'utf8'));
+    } else {
+      console.info('[HuggingFaceSource] Mock-only source — no fixtures found, will return empty results');
     }
   }
 

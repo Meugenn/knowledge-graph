@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,14 +14,7 @@ const FEED_ITEMS = [
 ];
 
 function ResearchFeed() {
-  const [items, setItems] = useState(FEED_ITEMS);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Simulate live updates
-    }, 10000);
-    return () => clearInterval(interval);
-  }, []);
+  const items = FEED_ITEMS;
 
   return (
     <div className="max-w-2xl mx-auto pb-20">
@@ -46,6 +39,9 @@ function ResearchFeed() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.1 }}
+              role="button"
+              tabIndex={0}
+              aria-label={`View ${item.type}: ${item.title}`}
               className="border border-neutral-100 p-5 hover:bg-neutral-50 transition-colors group cursor-pointer relative"
             >
               <div className="flex items-start justify-between mb-3">

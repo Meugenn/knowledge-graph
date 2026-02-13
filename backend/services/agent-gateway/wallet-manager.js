@@ -52,13 +52,6 @@ class WalletManager {
     return { address: w.address, agentId: w.agentId, createdAt: w.createdAt };
   }
 
-  getAllWallets() {
-    return Object.values(this.wallets).map(w => ({
-      address: w.address,
-      agentId: w.agentId,
-      createdAt: w.createdAt,
-    }));
-  }
 }
 
 module.exports = WalletManager;

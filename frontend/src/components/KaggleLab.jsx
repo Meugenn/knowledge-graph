@@ -43,7 +43,7 @@ const KaggleLab = () => {
 
   // Fetch knowledge graph from API
   const fetchKnowledgeGraph = useCallback(async () => {
-    if (!competition) return;
+    if (!competition || !BACKEND_URL) return;
     try {
       const response = await fetch(`${BACKEND_URL}/api/kaggle/knowledge-graph/${competition}`);
       if (response.ok) {
@@ -55,8 +55,12 @@ const KaggleLab = () => {
     }
   }, [competition]);
 
-  // Check if backend is reachable
+  // Check if backend is reachable (Kaggle Lab requires a dedicated backend with Python)
   useEffect(() => {
+    if (!BACKEND_URL) {
+      setBackendOnline(false);
+      return;
+    }
     const check = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/kaggle/sessions`, { signal: AbortSignal.timeout(3000) });
@@ -69,11 +73,11 @@ const KaggleLab = () => {
   }, []);
 
   useEffect(() => {
-    if (backendOnline === false) return;
+    if (backendOnline === false || !BACKEND_URL) return;
     const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
     const ws = new WebSocket(wsUrl);
 
-    ws.onopen = () => console.log('Connected to WebSocket');
+    ws.onopen = () => {};
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -96,10 +100,11 @@ const KaggleLab = () => {
       // Handle paper-matched events
       if (data.event === 'paper_matched') {
         setMatchedPapers(prev => [...prev, {
-          paperId: data.paperId,
-          paperTitle: data.paperTitle,
+          paperId: data.paperId || data.paper_id,
+          paperTitle: data.paperTitle || data.paper_title,
           technique: data.technique,
           reason: data.reason,
+          source: data.source || 'registry',
         }]);
       }
 
@@ -196,8 +201,8 @@ const KaggleLab = () => {
       }
     };
 
-    ws.onerror = (error) => console.error('WebSocket error:', error);
-    ws.onclose = () => console.log('WebSocket disconnected');
+    ws.onerror = () => {};
+    ws.onclose = () => {};
     wsRef.current = ws;
 
     return () => ws.close();
@@ -228,7 +233,12 @@ const KaggleLab = () => {
       const response = await fetch(`${BACKEND_URL}/api/kaggle/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ competition: competition.trim(), apiToken: apiToken.trim() }),
+        body: JSON.stringify({
+          competition: competition.trim(),
+          apiToken: apiToken.trim(),
+          llmProvider: localStorage.getItem('rg_llm_provider') || '',
+          llmModel: localStorage.getItem('rg_llm_model') || '',
+        }),
       });
       const data = await response.json();
       setSessionId(data.sessionId);
@@ -325,8 +335,8 @@ const KaggleLab = () => {
             <div className="text-sm font-medium text-amber-800">AI Kaggle Lab Unavailable</div>
             <div className="text-xs text-amber-600 mt-0.5">
               The Kaggle Lab requires backend services (Python ML agents + WebSocket coordination).
-              {' '}For local development: <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">cd backend && npm start</code>
-              {' '}For production: Deploy backend to Railway/Render and set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> in Vercel.
+              {' '}The Kaggle Lab requires a dedicated backend server with Python ML agents.
+              {' '}Set <code className="bg-amber-100 px-1 py-0.5 rounded text-[11px]">VITE_BACKEND_URL</code> to your backend URL to enable this feature.
             </div>
           </div>
         </div>
@@ -451,11 +461,12 @@ const KaggleLab = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {matchedPapers.map((paper, idx) => {
                 const info = getPaperInfo(paper.paperId);
+                const isAI = paper.source === 'ai';
                 return (
                   <div
                     key={idx}
                     className="border border-neutral-200 bg-white p-4 space-y-2"
-                    style={{ borderLeftWidth: 3, borderLeftColor: info.color }}
+                    style={{ borderLeftWidth: 3, borderLeftColor: isAI ? '#8b5cf6' : info.color }}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="space-y-0.5 min-w-0">
@@ -466,13 +477,24 @@ const KaggleLab = () => {
                           {paper.paperId}
                         </span>
                       </div>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] shrink-0"
-                        style={{ background: info.color + '20', color: info.color, borderColor: info.color + '40' }}
-                      >
-                        {info.tag}
-                      </Badge>
+                      <div className="flex gap-1 shrink-0">
+                        {isAI && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px]"
+                            style={{ background: '#8b5cf620', color: '#8b5cf6', borderColor: '#8b5cf640' }}
+                          >
+                            AI
+                          </Badge>
+                        )}
+                        <Badge
+                          variant="outline"
+                          className="text-[10px]"
+                          style={{ background: info.color + '20', color: info.color, borderColor: info.color + '40' }}
+                        >
+                          {info.tag}
+                        </Badge>
+                      </div>
                     </div>
                     <p className="text-sm text-neutral-500 font-light leading-relaxed">
                       {paper.reason}

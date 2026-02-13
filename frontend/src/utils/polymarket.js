@@ -1,5 +1,4 @@
-// Polymarket integration — tries same-origin serverless function first, then backend proxy
-import { BACKEND_URL } from '../config';
+// Polymarket integration — uses same-origin Vercel serverless function
 const POLYMARKET_BASE = "https://polymarket.com/event";
 
 // Parse a JSON string field that might already be an array
@@ -17,7 +16,6 @@ function parseJsonField(raw, fallback = []) {
 }
 
 async function fetchEventsRaw(limit) {
-  // Try 1: same-origin Vercel serverless function (works on Vercel deployment)
   try {
     const res = await fetch(`/api/polymarket/events?limit=${limit}`);
     if (res.ok) {
@@ -25,15 +23,6 @@ async function fetchEventsRaw(limit) {
       if (Array.isArray(data)) return data;
     }
   } catch {}
-
-  // Try 2: Express backend proxy (works in local dev)
-  if (BACKEND_URL) {
-    const res = await fetch(`${BACKEND_URL}/api/polymarket/events?limit=${limit}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) return data;
-    }
-  }
 
   return [];
 }
