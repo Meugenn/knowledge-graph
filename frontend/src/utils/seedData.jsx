@@ -1,5 +1,6 @@
 // Pre-fetched landmark AI/ML papers with citation relationships
 // Guarantees the demo always works, even offline
+import { assignTimelinePositions } from './timelineLayout';
 
 const SEED_PAPERS = [
   {
@@ -733,6 +734,9 @@ export function getSeedGraphData() {
     source,
     target,
   }));
+
+  // Pre-assign timeline positions so the graph renders instantly
+  assignTimelinePositions(nodes, links);
 
   return { nodes, links };
 }

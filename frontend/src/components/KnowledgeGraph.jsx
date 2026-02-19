@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import ForceGraph2D from 'react-force-graph-2d';
 import { GRAPH_COLORS } from '../config';
 import { searchPapers, buildGraphFromPapers, mergeOnChainPapers } from '../utils/semanticScholar';
+import { assignTimelinePositions, CLUSTERS, yearToX, clusterToY, LAYOUT_BOUNDS } from '../utils/timelineLayout';
 import PaperDetail from './PaperDetail';
 import GNNPredictor from './GNNPredictor';
 import ResearchAgent from './ResearchAgent';
@@ -145,6 +146,10 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmRemoveAll, setConfirmRemoveAll] = useState(false);
 
+  // Timeline layout — initial zoom done flag
+  const initialZoomDone = useRef(false);
+  const lastAxisFrame = useRef(0);
+
   // Time animation state
   const [playing, setPlaying] = useState(false);
   const playRef = useRef(false);
@@ -212,7 +217,11 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           }
         }
         if (!cancelled && papers.length > 0) {
-          setGraphData(prev => mergeOnChainPapers(prev, papers, account));
+          setGraphData(prev => {
+            const merged = mergeOnChainPapers(prev, papers, account);
+            assignTimelinePositions(merged.nodes, merged.links);
+            return merged;
+          });
         }
       } catch {
         // On-chain papers unavailable — expected when wallet not connected
@@ -254,7 +263,11 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
         for (const paper of apiResults) {
           matchedIds.add(paper.id);
         }
-        setGraphData(prev => buildGraphFromPapers(apiResults, prev));
+        setGraphData(prev => {
+          const merged = buildGraphFromPapers(apiResults, prev);
+          assignTimelinePositions(merged.nodes, merged.links);
+          return merged;
+        });
       }
     } catch (err) {
       console.error('Search error:', err);
@@ -288,6 +301,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     // Mark as spawning so paintNode renders the entrance animation
     const paperId = paper.id;
     const paperWithSpawn = { ...paper, _spawnTime: Date.now() };
+
+    // Assign timeline position before adding to graph
+    assignTimelinePositions([...graphData.nodes, paper], graphData.links);
 
     setGraphData(prev => ({
       nodes: [...prev.nodes, paperWithSpawn],
@@ -333,7 +349,7 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     reheat();
     const reheatInterval = setInterval(reheat, 300);
     setTimeout(() => clearInterval(reheatInterval), 3000);
-  }, []);
+  }, [graphData]);
 
   // Import papers + citations from JSON or bulk sources
   const handleImportPapers = useCallback((papers, citations = []) => {
@@ -368,7 +384,9 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
           allLinks.push({ source: src, target: tgt, predicted: c.predicted || false });
         }
       });
-      return { nodes: Array.from(nodeMap.values()), links: allLinks };
+      const allNodes = Array.from(nodeMap.values());
+      assignTimelinePositions(allNodes, allLinks);
+      return { nodes: allNodes, links: allLinks };
     });
   }, []);
 
@@ -479,16 +497,6 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     };
   }, [playing, filters.yearRange]);
 
-  // Configure force for predicted links
-  useEffect(() => {
-    if (fgRef.current) {
-      const linkForce = fgRef.current.d3Force('link');
-      if (linkForce) {
-        linkForce.strength(link => link.predicted ? 0 : 1);
-      }
-    }
-  }, [predictedLinks, showPredictedLinks]);
-
   // Handle GNN predictions
   const handlePredictions = useCallback((preds) => {
     setPredictedLinks(preds);
@@ -592,6 +600,26 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
     return { nodes: filteredNodes, links: filteredLinks };
   }, [graphData, filters, showPredictedLinks, predictedLinks, colorByField]);
 
+  // Timeline layout: remove all forces (nodes are pinned via fx/fy)
+  useEffect(() => {
+    if (fgRef.current) {
+      fgRef.current.d3Force('charge', null);
+      fgRef.current.d3Force('center', null);
+      fgRef.current.d3Force('link', null);
+      fgRef.current.d3Force('collide', null);
+    }
+  }, [filteredData]);
+
+  // Initial zoom-to-fit on first render
+  useEffect(() => {
+    if (!initialZoomDone.current && fgRef.current && filteredData.nodes.length > 0) {
+      initialZoomDone.current = true;
+      setTimeout(() => {
+        if (fgRef.current) fgRef.current.zoomToFit(400, 60);
+      }, 300);
+    }
+  }, [filteredData.nodes.length]);
+
   // Node color
   const getNodeColor = useCallback((node) => {
     if (colorByField) return getFieldColor(node);
@@ -602,6 +630,53 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
 
   // Custom node rendering
   const paintNode = useCallback((node, ctx, globalScale) => {
+    // Draw timeline axis once per frame (on first node)
+    const now = Date.now();
+    if (now - lastAxisFrame.current > 15) {
+      lastAxisFrame.current = now;
+      const { X_MIN, X_MAX, Y_MIN, Y_MAX, MIN_YEAR, MAX_YEAR } = LAYOUT_BOUNDS;
+
+      ctx.save();
+      // Year gridlines
+      for (let year = MIN_YEAR; year <= MAX_YEAR; year += 2) {
+        const x = yearToX(year);
+        // Vertical guide line
+        ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+        ctx.lineWidth = 1 / globalScale;
+        ctx.beginPath();
+        ctx.moveTo(x, Y_MIN - 30);
+        ctx.lineTo(x, Y_MAX + 30);
+        ctx.stroke();
+        // Year label at bottom
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.font = `${Math.max(11 / globalScale, 3)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(year.toString(), x, Y_MAX + 35);
+      }
+
+      // Cluster band labels on left side
+      const bandHeight = (Y_MAX - Y_MIN) / Object.keys(CLUSTERS).length;
+      Object.values(CLUSTERS).forEach(cluster => {
+        const y = clusterToY(cluster.index);
+        // Subtle horizontal divider between bands
+        const dividerY = y + bandHeight / 2;
+        ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+        ctx.lineWidth = 1 / globalScale;
+        ctx.beginPath();
+        ctx.moveTo(X_MIN - 120, dividerY);
+        ctx.lineTo(X_MAX + 40, dividerY);
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = `${Math.max(10 / globalScale, 3)}px monospace`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cluster.label, X_MIN - 20, y);
+      });
+      ctx.restore();
+    }
+
     const label = node.title?.length > 30 ? node.title.slice(0, 28) + '...' : node.title;
     const fontSize = Math.max(10 / globalScale, 2);
     const isHighlighted = highlightedIds.has(node.id);
@@ -1171,10 +1246,10 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
             linkDirectionalArrowLength={(link) => link.predicted ? 0 : (filteredData.nodes.length > 500 ? 0 : 3)}
             linkDirectionalArrowRelPos={1}
             onNodeClick={handleNodeClick}
-            cooldownTicks={filteredData.nodes.length > 500 ? 50 : 100}
-            d3AlphaDecay={filteredData.nodes.length > 500 ? 0.05 : 0.02}
-            d3VelocityDecay={filteredData.nodes.length > 500 ? 0.4 : 0.3}
-            warmupTicks={filteredData.nodes.length > 1000 ? 50 : 0}
+            cooldownTicks={1}
+            d3AlphaDecay={1}
+            d3VelocityDecay={0.8}
+            warmupTicks={0}
             nodeLabel={node => `${node.title} (${(node.citationCount || 0).toLocaleString()} citations)`}
           />
         )}
@@ -1234,7 +1309,11 @@ function KnowledgeGraph({ contracts, account, graphData, setGraphData, onImportP
             <ResearchAgent
               graphData={graphData}
               onGraphAction={handleGraphAction}
-              onAddPapers={(papers) => setGraphData(prev => buildGraphFromPapers(papers, prev))}
+              onAddPapers={(papers) => setGraphData(prev => {
+                const merged = buildGraphFromPapers(papers, prev);
+                assignTimelinePositions(merged.nodes, merged.links);
+                return merged;
+              })}
               onClose={() => setShowAgent(false)}
             />
           </div>

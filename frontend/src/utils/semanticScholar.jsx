@@ -1,6 +1,7 @@
 import { SEMANTIC_SCHOLAR } from '../config';
 import { getSeedGraphData } from './seedData';
 import { normalizeS2Paper } from './normalization';
+import { assignTimelinePositions } from './timelineLayout';
 
 // In-memory cache
 const cache = new Map();
@@ -317,7 +318,9 @@ export async function loadInitialGraph() {
     ]);
 
     if (liveResults.length > 0) {
-      return buildGraphFromPapers(liveResults, seedGraph);
+      const merged = buildGraphFromPapers(liveResults, seedGraph);
+      assignTimelinePositions(merged.nodes, merged.links);
+      return merged;
     }
   } catch (e) {
     // Live API unavailable, seed data is fine
